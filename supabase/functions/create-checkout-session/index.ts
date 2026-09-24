@@ -1,6 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import Stripe from "https://esm.sh/stripe@14.22.0?target=deno"
 import {
+  CONSULTATION_CATALOG,
+  WORKSHOP_CATALOG,
+  PROMO_CATALOG,
   PURCHASE_TYPES,
   HttpError,
   assertAllowedOrigin,
@@ -9,6 +12,9 @@ import {
   createAdminClient,
   createStripeClient,
   getAuthenticatedUser,
+  getConsultationDetails,
+  getWorkshopDetails,
+  getPromoDetails,
   getValidatedCatalog,
   handleOptions,
   isUuid,
@@ -16,11 +22,52 @@ import {
   readCorsConfig,
   readProductionConfig,
   requirePost,
+  resolveConsultationPrice,
+  resolveWorkshopPrice,
+  resolvePromoPrice,
+  resolveDynamicStripePrice,
   resolveReturnBaseUrl,
   safeErrorResponse,
+  isSingleConsultation,
+  isWorkshopPurchase,
+  isPromoPurchase,
+  normalizePromoPurchaseType,
 } from "../_shared/stripe-production.ts"
 
-const APP_RELEASE = '6.7'
+const APP_RELEASE = '15.1'
+const MADRID_TIME_ZONE = 'Europe/Madrid'
+const MEMBERSHIP_MONTHS_AHEAD = 11
+
+function madridYearMonth(date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: MADRID_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(date)
+  const year = parts.find((part) => part.type === 'year')?.value
+  const month = parts.find((part) => part.type === 'month')?.value
+  if (!year || !month) throw new Error('No se pudo determinar el mes natural en Madrid.')
+  return `${year}-${month}`
+}
+
+function addMonths(yearMonth: string, amount: number): string {
+  const [year, month] = yearMonth.split('-').map(Number)
+  const shifted = new Date(Date.UTC(year, month - 1 + amount, 1))
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+function validateMembershipMonth(value: unknown): string {
+  const membershipMonth = String(value || '').trim()
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(membershipMonth)) {
+    throw new HttpError(400, 'Selecciona un mes natural válido para el Bono Ilimitado.')
+  }
+  const currentMonth = madridYearMonth()
+  const lastAllowedMonth = addMonths(currentMonth, MEMBERSHIP_MONTHS_AHEAD)
+  if (membershipMonth < currentMonth || membershipMonth > lastAllowedMonth) {
+    throw new HttpError(400, 'El mes elegido debe estar entre el mes actual y los próximos 11 meses.')
+  }
+  return membershipMonth
+}
 
 async function expireCreatedCheckoutSession(
   stripe: ReturnType<typeof createStripeClient>,
@@ -56,15 +103,34 @@ serve(async (req) => {
       throw new HttpError(400, 'El cuerpo de la solicitud no es válido.')
     }
 
-    const lookupKey = String(body.lookup_key || '').trim()
-    if (lookupKey !== PURCHASE_TYPES.CLASE_SUELTA && lookupKey !== PURCHASE_TYPES.BONO_MENSUAL) {
+    const rawLookupKey = String(body.lookup_key || '').trim()
+    const lookupKey = normalizePromoPurchaseType(rawLookupKey)
+    const allowedPurchaseTypes = new Set<string>([
+      PURCHASE_TYPES.CLASE_SUELTA,
+      PURCHASE_TYPES.PACK_4,
+      PURCHASE_TYPES.PACK_6,
+      PURCHASE_TYPES.PACK_10,
+      PURCHASE_TYPES.BONO_ILIMITADO,
+      ...Object.keys(CONSULTATION_CATALOG),
+      ...Object.keys(WORKSHOP_CATALOG),
+      ...Object.keys(PROMO_CATALOG),
+    ])
+    const isDynamicStripe = lookupKey.startsWith('prod_') || lookupKey.startsWith('price_')
+    if (!allowedPurchaseTypes.has(lookupKey) && !isDynamicStripe) {
       throw new HttpError(400, 'Producto no permitido.')
     }
+    const membershipMonth = (lookupKey === PURCHASE_TYPES.BONO_ILIMITADO || lookupKey === PURCHASE_TYPES.CLASE_ESPECIAL)
+      ? (body.membership_month ? validateMembershipMonth(body.membership_month) : madridYearMonth())
+      : null
 
     const requestedUserId = String(body.user_id || '').trim()
     const isGuest = requestedUserId === 'guest'
-    if (isGuest && lookupKey !== PURCHASE_TYPES.CLASE_SUELTA) {
-      throw new HttpError(400, 'Los invitados solo pueden adquirir una clase suelta.')
+    const isConsultationSingle = isSingleConsultation(lookupKey)
+    const isWorkshop = isWorkshopPurchase(lookupKey)
+    const isPromo = isPromoPurchase(lookupKey)
+
+    if (isGuest && (lookupKey !== PURCHASE_TYPES.CLASE_SUELTA && !isConsultationSingle && (!isWorkshop || lookupKey === PURCHASE_TYPES.CLASE_ESPECIAL) && !isDynamicStripe)) {
+      throw new HttpError(400, 'Los invitados solo pueden adquirir una clase suelta, consulta individual o taller.')
     }
     const requestedAttemptId = String(body.checkout_attempt_id || '').trim()
     if (requestedAttemptId && !isUuid(requestedAttemptId)) {
@@ -76,7 +142,7 @@ serve(async (req) => {
     const supabase = createAdminClient(config)
 
     const user = isGuest ? null : await getAuthenticatedUser(req, supabase, true)
-    if (!isGuest && requestedUserId !== user?.id) {
+    if (!isGuest && requestedUserId && requestedUserId !== user?.id) {
       throw new HttpError(403, 'El usuario de la compra no coincide con la sesión autenticada.')
     }
 
@@ -84,7 +150,7 @@ serve(async (req) => {
     if (user) {
       const { data: profile, error } = await supabase
         .from('profiles')
-        .select('bono_mensual_activo, bono_mensual_fin, stripe_subscription_status, stripe_customer_id, account_deletion_pending')
+        .select('stripe_customer_id, account_deletion_pending, descuento_promo_50_activo, codigo_promo_usado')
         .eq('id', user.id)
         .single()
 
@@ -92,21 +158,21 @@ serve(async (req) => {
       if (profile.account_deletion_pending) {
         throw new HttpError(409, 'La cuenta se está eliminando y no puede iniciar nuevos pagos.')
       }
+      if (isPromo && profile.codigo_promo_usado) {
+        throw new HttpError(400, 'Ya has utilizado la promoción del 50% de descuento en tu 1ª clase.')
+      }
 
-      const manualMonthlyEnd = profile.bono_mensual_fin
-        ? Date.parse(String(profile.bono_mensual_fin))
-        : Number.NaN
-      const hasCurrentManualMonthly = Boolean(profile.bono_mensual_activo) && (
-        !profile.bono_mensual_fin ||
-        Number.isNaN(manualMonthlyEnd) ||
-        manualMonthlyEnd > Date.now()
-      )
-
-      if (
-        lookupKey === PURCHASE_TYPES.BONO_MENSUAL &&
-        (hasCurrentManualMonthly || ['active', 'trialing', 'past_due'].includes(profile.stripe_subscription_status || ''))
-      ) {
-        throw new HttpError(409, 'Ya tienes un Bono Mensual vinculado a tu cuenta.')
+      if (membershipMonth && lookupKey === PURCHASE_TYPES.BONO_ILIMITADO) {
+        const { data: existingMonth, error: existingMonthError } = await supabase
+          .from('unlimited_membership_periods')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('membership_month', `${membershipMonth}-01`)
+          .maybeSingle()
+        if (existingMonthError) throw new Error('No se pudo comprobar el mes ilimitado elegido.')
+        if (existingMonth) {
+          throw new HttpError(409, 'Ya tienes comprado el Bono Ilimitado para ese mes natural.')
+        }
       }
       if (profile.stripe_customer_id && !String(profile.stripe_customer_id).startsWith('cus_')) {
         throw new Error('El identificador Stripe del perfil no es válido.')
@@ -116,9 +182,15 @@ serve(async (req) => {
 
     const catalog = await getValidatedCatalog(stripe, config)
     const purchaseType = lookupKey
-    const price = purchaseType === PURCHASE_TYPES.CLASE_SUELTA
-      ? catalog.claseSuelta
-      : catalog.bonoMensual
+    const priceByPurchaseType: Record<string, Stripe.Price> = {
+      [PURCHASE_TYPES.CLASE_SUELTA]: catalog.claseSuelta,
+      [PURCHASE_TYPES.PACK_4]: catalog.pack4,
+      [PURCHASE_TYPES.PACK_6]: catalog.pack6,
+      [PURCHASE_TYPES.PACK_10]: catalog.pack10,
+      [PURCHASE_TYPES.BONO_ILIMITADO]: catalog.bonoIlimitado,
+    }
+    const price = priceByPurchaseType[purchaseType]
+    const isSubscription = purchaseType === PURCHASE_TYPES.BONO_MENSUAL
     const appUserId = isGuest ? 'guest' : user!.id
     const source = body.from === 'profile' ? 'profile' : 'tarifas'
     const metadata: Stripe.MetadataParam = {
@@ -130,15 +202,100 @@ serve(async (req) => {
       source,
       checkout_attempt_id: checkoutAttemptId,
     }
+    if (membershipMonth) metadata.membership_month = membershipMonth
 
     const returnBaseUrl = resolveReturnBaseUrl(req, config)
+
+    let lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = []
+
+    if (price) {
+      lineItems = [{ price: price.id, quantity: 1 }]
+    } else if (getConsultationDetails(purchaseType)) {
+      const details = getConsultationDetails(purchaseType)!
+      const consultationPrice = await resolveConsultationPrice(stripe, purchaseType)
+
+      if (consultationPrice) {
+        lineItems = [{ price: consultationPrice.id, quantity: 1 }]
+      } else {
+        if (details.productId) {
+          throw new Error(`No se pudo resolver el Price del producto ${details.productId}.`)
+        }
+        lineItems = [
+          {
+            price_data: {
+              currency: 'eur',
+              unit_amount: details.amount,
+              product_data: {
+                name: details.name,
+                metadata: { lookup_key: lookupKey },
+              },
+            },
+            quantity: 1,
+          },
+        ]
+      }
+    } else if (getWorkshopDetails(purchaseType)) {
+      const details = getWorkshopDetails(purchaseType)!
+      let workshopPrice: Stripe.Price | null = null
+      try {
+        workshopPrice = await resolveWorkshopPrice(stripe, purchaseType)
+      } catch (err) {
+        console.warn('resolveWorkshopPrice warning:', err)
+      }
+
+      if (workshopPrice) {
+        lineItems = [{ price: workshopPrice.id, quantity: 1 }]
+      } else {
+        lineItems = [
+          {
+            price_data: {
+              currency: 'eur',
+              unit_amount: details.amount || 2000,
+              product: details.productId,
+            },
+            quantity: 1,
+          },
+        ]
+      }
+    } else if (getPromoDetails(purchaseType)) {
+      const details = getPromoDetails(purchaseType)!
+      let promoPrice: Stripe.Price | null = null
+      try {
+        promoPrice = await resolvePromoPrice(stripe, purchaseType)
+      } catch (err) {
+        console.warn('resolvePromoPrice warning:', err)
+      }
+
+      if (promoPrice) {
+        lineItems = [{ price: promoPrice.id, quantity: 1 }]
+      } else {
+        lineItems = [
+          {
+            price_data: {
+              currency: 'eur',
+              unit_amount: details.amount || 750,
+              product: details.productId,
+            },
+            quantity: 1,
+          },
+        ]
+      }
+    } else if (isDynamicStripe) {
+      const dynamicResolved = await resolveDynamicStripePrice(stripe, purchaseType)
+      if (!dynamicResolved) {
+        throw new HttpError(400, 'No se pudo resolver el precio activo en Stripe para el producto seleccionado.')
+      }
+      lineItems = [{ price: dynamicResolved.price.id, quantity: 1 }]
+    } else {
+      throw new HttpError(400, 'Precio no configurado para el producto seleccionado.')
+    }
+
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
-      line_items: [{ price: price.id, quantity: 1 }],
-      mode: purchaseType === PURCHASE_TYPES.BONO_MENSUAL ? 'subscription' : 'payment',
+      line_items: lineItems,
+      mode: isSubscription ? 'subscription' : 'payment',
       client_reference_id: appUserId,
       success_url: `${returnBaseUrl}/success.html?session_id={CHECKOUT_SESSION_ID}${isGuest ? '&guest=true' : ''}&from=${source}`,
       cancel_url: `${returnBaseUrl}/cancel.html?from=${source}`,
-      payment_method_types: ['card'],
       metadata,
     }
 
@@ -148,7 +305,11 @@ serve(async (req) => {
       sessionParams.customer_email = user.email
     }
 
-    if (purchaseType === PURCHASE_TYPES.CLASE_SUELTA) {
+    if (isGuest || isConsultationSingle || isWorkshop || isDynamicStripe) {
+      sessionParams.phone_number_collection = { enabled: true }
+    }
+
+    if (!isSubscription) {
       if (!stripeCustomerId) sessionParams.customer_creation = 'always'
       sessionParams.payment_intent_data = { metadata }
     } else {
@@ -163,9 +324,34 @@ serve(async (req) => {
       'checkout',
       purchaseType,
       appUserId,
+      membershipMonth || 'no_month',
       checkoutAttemptId,
     ].join(':')
-    const session = await stripe.checkout.sessions.create(sessionParams, { idempotencyKey })
+    let session: Stripe.Checkout.Session
+    try {
+      session = await stripe.checkout.sessions.create(sessionParams, { idempotencyKey })
+    } catch (createErr) {
+      const details = getPromoDetails(purchaseType)
+      if (isPromo && details) {
+        console.warn('Reintentando creación de sesión promo con product_data fallback:', createErr)
+        sessionParams.line_items = [
+          {
+            price_data: {
+              currency: 'eur',
+              unit_amount: details.amount || 750,
+              product_data: {
+                name: details.name,
+                metadata: { lookup_key: lookupKey, product_id: details.productId },
+              },
+            },
+            quantity: 1,
+          },
+        ]
+        session = await stripe.checkout.sessions.create(sessionParams, { idempotencyKey: `${idempotencyKey}:fallback` })
+      } else {
+        throw createErr
+      }
+    }
     if (!session.livemode) {
       throw new Error('Stripe no devolvió una sesión LIVE válida.')
     }

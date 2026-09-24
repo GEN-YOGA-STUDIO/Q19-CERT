@@ -1,0 +1,125 @@
+name: Build Android AAB (+ Play)
+
+# Distribución Android automatizada: compila el AAB firmado y,
+# si existe el secreto PLAY_SERVICE_ACCOUNT_JSON, lo sube a Play Console.
+# Lanzado manual o con: gh workflow run deploy-android --ref main
+# O desde local: node scripts/ship.mjs <version> --upload-android
+#
+# Secretos (crear UNA vez en repo → Settings → Secrets → Actions):
+#   ANDROID_KEYSTORE_PASSWORD   → contraseña del release-key.jks (ya puesta)
+#   ANDROID_KEY_PASSWORD        → contraseña de la clave yoga-key (ya puesta)
+#   PLAY_SERVICE_ACCOUNT_JSON   → JSON de la service account de Play Console
+#       (Play Console → Configuración → Acceso a la API → crear/ vincular
+#        cuenta de servicio con permiso "Publicar en testing"; SOLO esto es manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      track:
+        description: 'Canal de Play (internal recomendado)'
+        required: false
+        default: 'internal'
+        type: choice
+        options: [internal, alpha, beta, production]
+
+jobs:
+  validate:
+    name: Puerta de calidad (checks bloqueantes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Instalar dependencias y sincronizar Capacitor (Android)
+        working-directory: app android
+        run: |
+          npm ci --no-audit --no-fund
+          npx cap sync android
+      - name: Instalar dependencias y sincronizar Capacitor (iOS)
+        working-directory: app ios
+        run: |
+          npm ci --no-audit --no-fund
+          npx cap sync ios
+      - name: Instalar dependencias raíz (checks runtime)
+        run: npm ci --no-audit --no-fund
+      - name: Instalar Chromium (checks runtime)
+        run: |
+          CORE_VER=$(node -p "require('./node_modules/playwright-core/package.json').version")
+          npx -y playwright@$CORE_VER install --only-shell chromium
+      - name: Batería completa de checks
+        run: npm test
+
+  build:
+    name: AAB firmado
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Instalar dependencias y sincronizar Capacitor
+        working-directory: app android
+        run: |
+          npm ci --no-audit --no-fund
+          npx cap sync android
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
+
+      - name: Compilar AAB firmado
+        working-directory: app android/android
+        env:
+          GENYOGA_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          GENYOGA_KEY_ALIAS: yoga-key
+          GENYOGA_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew bundleRelease
+
+      - name: Subir AAB como artefacto
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: GenYoga-android-aab
+          path: app android/android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+  play:
+    name: Subida a Play Console
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Descargar AAB
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: GenYoga-android-aab
+          path: dist
+      - name: Comprobar secreto de Play
+        id: gate
+        run: |
+          if [ -z "${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}" ]; then
+            echo "⛔ Falta el secreto PLAY_SERVICE_ACCOUNT_JSON."
+            echo "Créalo una vez en Play Console → Configuración → Acceso a la API"
+            echo "(service account con permiso de publicar en testing) y pégalo en repo → Settings → Secrets."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Subir al canal
+        if: steps.gate.outputs.ready == 'true'
+        uses: r0adkll/upload-google-play@eb49699984a3 # v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: gen.yoga.app
+          releaseFiles: dist/app-release.aab
+          track: ${{ inputs.track || 'internal' }}
+          status: completed

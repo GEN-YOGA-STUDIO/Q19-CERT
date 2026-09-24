@@ -31,7 +31,7 @@ function count(source, pattern) {
 async function collectTextFiles(directory) {
   const results = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (['.git', 'node_modules', 'img', 'fonts', '.temp'].includes(entry.name)) continue;
+    if (['.git', 'node_modules', 'img', 'fonts', '.temp', 'app android', 'app ios', 'build', '.gradle', '.cursor', '.gemini', '.idea', '.vscode'].includes(entry.name)) continue;
     const absolute = path.join(directory, entry.name);
     if (entry.isDirectory()) {
       results.push(...await collectTextFiles(absolute));
@@ -48,21 +48,24 @@ const functionPaths = [
   'supabase/functions/create-portal-session/index.ts',
   'supabase/functions/get-checkout-session/index.ts',
   'supabase/functions/book-guest-class/index.ts',
+  'supabase/functions/book-unlimited-guest/index.ts',
   'supabase/functions/stripe-webhook/index.ts',
   'supabase/functions/delete-account/index.ts',
 ];
 
 const functionSources = await Promise.all(functionPaths.map(read));
 const allFunctions = functionSources.join('\n');
-const [shared, checkout, portal, getSession, guestBooking, webhook, deleteAccount] = functionSources;
+const [shared, checkout, portal, getSession, guestBooking, unlimitedGuestBooking, webhook, deleteAccount] = functionSources;
 const migration = await read('supabase/migrations/202607200001_stripe_production.sql');
 const consultationMigration = await read('supabase/migrations/202607210001_consultation_booking_integrity.sql');
 const balanceMigration = await read('supabase/migrations/202607210002_admin_balance_integrity.sql');
 const accountDeletionMigration = await read('supabase/migrations/202607210003_account_deletion_guard.sql');
 const profileAuthorizationMigration = await read('supabase/migrations/202607210004_profile_authorization_integrity.sql');
+const packsMigration = await read('supabase/migrations/202608030002_class_packs_unlimited_6_9.sql');
+const consultationBillingMigration = await read('supabase/migrations/202609020004_consultas_checkout_billing.sql');
 const config = await read('supabase/config.toml');
 const envExample = await read('supabase/functions/.env.example');
-const productionGuide = await read('STRIPE_PRODUCTION.md');
+const productionGuide = await read('docs/STRIPE_PRODUCTION.md').catch(() => read('STRIPE_PRODUCTION.md'));
 const frontendPaths = ['tarifas.html', 'profile.html', 'success.html'];
 const frontendSources = await Promise.all(frontendPaths.map(read));
 const frontend = frontendSources.join('\n');
@@ -75,6 +78,32 @@ requireText(shared, "startsWith('sk_live_')", 'Configuración LIVE');
 requireText(shared, "startsWith('whsec_')", 'Firma del webhook');
 requireText(shared, "startsWith('bpc_')", 'Configuración del portal');
 requireText(shared, 'price.unit_amount !== expectedAmount', 'Validación de importes');
+for (const [productId, label] of [
+  ['prod_V0ITB6mD71fwnD', 'pack de 4 clases'],
+  ['prod_V0IUpyuvd7uX00', 'pack de 6 clases'],
+  ['prod_V0IUYoGJJbX7FW', 'pack de 10 clases'],
+  ['prod_V1pKHgtMwPkCpC', 'Miriam acompañamiento inicial'],
+  ['prod_V1pLmzpCRU8ZpL', 'Miriam acompañamiento sucesivo'],
+  ['prod_V1pLCY3t5sprlK', 'Miriam pareja inicial'],
+  ['prod_V1pLWNLzr9Vb3g', 'Miriam pareja sucesiva'],
+  ['prod_V1ppAeiDF9dlkZ', 'Isabel PNI inicial'],
+  ['prod_V1pqPF6rtJf0SW', 'Isabel PNI sucesiva'],
+  ['prod_V5uBKuweMRE6ig', 'Clase Especial'],
+  ['prod_V5uCPKKKH5K74P', 'Taller Introducción Power Vinyasa'],
+  ['prod_VDY8mI9bZ3SQeb', 'Taller 25 euros'],
+  ['prod_V9eGZTzwCNJ55q', 'Promo 50% GEN YOGA'],
+]) {
+  requireText(shared, productId, `Producto Stripe de ${label}`);
+}
+for (const variableName of [
+  'STRIPE_PRICE_PACK_4',
+  'STRIPE_PRICE_PACK_6',
+  'STRIPE_PRICE_PACK_10',
+  'STRIPE_PRICE_BONO_ILIMITADO',
+]) {
+  requireText(shared, `requireEnv('${variableName}')`, `Catálogo ${variableName}`);
+  requireText(envExample, `${variableName}=`, `Ejemplo ${variableName}`);
+}
 requireText(shared, "buildOriginSet('ALLOWED_ORIGINS'", 'Lista de orígenes CORS');
 requireText(shared, 'config.allowedOrigins.has(origin)', 'Validación CORS por lista blanca');
 requireText(shared, "buildOriginSet('PAYMENT_ALLOWED_ORIGINS'", 'Lista de orígenes de pago LIVE');
@@ -100,8 +129,36 @@ requireText(checkout, 'checkoutAttemptId', 'Idempotencia individual de invitados
 requireText(checkout, 'profile.account_deletion_pending', 'Checkout bloqueado por eliminación pendiente');
 requireText(checkout, 'expireCreatedCheckoutSession', 'Cierre del Checkout creado durante eliminación');
 requireText(checkout, ".select('account_deletion_pending')", 'Revalidación post-Checkout del tombstone');
-requireText(checkout, "const APP_RELEASE = '6.7'", 'Versión autoritativa de Checkout');
+const pkg = JSON.parse(await read('package.json'));
+const currentVersionParts = pkg.version.split('.');
+const currentVersion = `${currentVersionParts[0]}.${currentVersionParts[1]}`;
+requireText(checkout, `const APP_RELEASE = '${currentVersion}'`, 'Versión autoritativa de Checkout');
 requireText(checkout, 'app_version: APP_RELEASE', 'Metadato uniforme de versión en Checkout');
+requireText(shared, 'getConsultationDetails', 'Catálogo canónico de consultas');
+requireText(checkout, 'getConsultationDetails', 'Resolución canónica de consultas en Checkout');
+requireText(shared, 'resolveConsultationPrice', 'Resolución del Price reutilizable de consultas');
+requireText(checkout, 'resolveConsultationPrice', 'Price reutilizable de consultas en Checkout');
+const resolveConsultationPriceBlock = shared.match(
+  /export async function resolveConsultationPrice[\s\S]*?(?=\nexport function assertValidConsultationPrice)/,
+)?.[0] || '';
+requireText(resolveConsultationPriceBlock, 'params.product = details.productId', 'Filtrado de Prices por Product canónico');
+requireText(resolveConsultationPriceBlock, 'active: true', 'Price activo de consulta');
+requireText(resolveConsultationPriceBlock, "type: 'one_time'", 'Price de pago único de consulta');
+requireText(checkout, 'if (details.productId)', 'Sin fallback efímero para Products canónicos');
+const validateCheckoutPurchaseBlock = shared.match(
+  /export function validateCheckoutPurchase[\s\S]*?(?=\nexport function validateMonthlySubscription)/,
+)?.[0] || '';
+requireText(validateCheckoutPurchaseBlock, 'getConsultationDetails', 'Catálogo canónico al validar Checkout');
+requireText(validateCheckoutPurchaseBlock, 'assertValidConsultationPrice', 'Validación del Price de consulta en Checkout');
+requireText(shared, 'stripeObjectId(price.product) === details.productId', 'Validación de price.product de consulta');
+forbid(checkout, /\bpayment_method_types\s*:/, 'Checkout con métodos de pago dinámicos');
+requireText(shared, "bonoIlimitado.type !== 'one_time'", 'Bono Ilimitado como pago único');
+requireText(shared, 'membership_month', 'Mes natural validado desde Stripe');
+requireText(checkout, 'validateMembershipMonth(body.membership_month)', 'Mes natural validado antes de Checkout');
+requireText(checkout, ".from('unlimited_membership_periods')", 'Duplicados de mes natural bloqueados');
+requireText(checkout, 'metadata.membership_month = membershipMonth', 'Mes natural incluido en metadatos Stripe');
+requireText(getSession, 'p_membership_month: purchase.membershipMonth', 'Mes natural consolidado en retorno');
+requireText(webhook, 'p_membership_month: purchase.membershipMonth', 'Mes natural consolidado por webhook');
 forbid(
   checkout,
   /appVersion\s*!==\s*APP_RELEASE|web está desactualizada/i,
@@ -109,6 +166,7 @@ forbid(
 );
 requireText(getSession, 'validateCheckoutPurchase', 'Validación de retorno');
 requireText(guestBooking, 'stripe_redeem_guest_checkout', 'Canje invitado');
+requireText(unlimitedGuestBooking, "supabase.rpc(\n      'reservar_invitado_ilimitado'", 'Canje de invitado ilimitado');
 requireText(webhook, 'constructEventAsync', 'Firma Stripe');
 requireText(webhook, 'if (!event.livemode)', 'Evento LIVE');
 requireText(webhook, "supabase.rpc('stripe_fulfill_checkout'", 'Fulfillment atómico');
@@ -135,15 +193,12 @@ requireText(deleteAccount, 'confirmationEmails.has(confirmationEmail)', 'Confirm
 requireText(deleteAccount, 'stripe.subscriptions.search', 'Búsqueda Stripe por propietario antes de eliminar');
 requireText(deleteAccount, 'stripe.subscriptions.list', 'Comprobación Stripe por Customer antes de eliminar');
 requireText(deleteAccount, 'TERMINATED_SUBSCRIPTION_STATUSES', 'Estados terminales de suscripción');
-requireText(deleteAccount, "deleteRowsByUser(supabase, 'reservas_yoga'", 'Limpieza de reservas Yoga');
-requireText(deleteAccount, "deleteRowsByUser(supabase, 'reservas_psicologia'", 'Limpieza de reservas Psicología');
-requireText(deleteAccount, "deleteRowsByUser(supabase, 'reservas_nutricion'", 'Limpieza de reservas Nutrición');
-requireText(deleteAccount, ".from('grupos_profesionales')", 'Limpieza de grupos');
+requireText(deleteAccount, "supabase.rpc(\n        'finalize_account_deletion'", 'Limpieza transaccional de la cuenta');
 requireText(deleteAccount, 'supabase.auth.admin.deleteUser', 'Borrado de Supabase Auth');
 requireBefore(
   deleteAccount,
   'await ensureSubscriptionsAreTerminated(',
-  "await deleteRowsByUser(supabase, 'reservas_yoga'",
+  "'finalize_account_deletion'",
   'Suscripción comprobada antes de eliminar datos',
 );
 requireBefore(
@@ -154,7 +209,7 @@ requireBefore(
 );
 requireBefore(
   deleteAccount,
-  "await deleteRowsByUser(supabase, 'stripe_customers'",
+  "'finalize_account_deletion'",
   'supabase.auth.admin.deleteUser',
   'Auth se elimina después de limpiar los datos',
 );
@@ -174,6 +229,15 @@ for (const [source, label] of [
     `Orden del guard LIVE en ${label}`,
   );
 }
+
+requireText(unlimitedGuestBooking, 'readCorsConfig()', 'CORS temprano en Invitado del Bono Ilimitado');
+requireText(unlimitedGuestBooking, 'assertPaymentOrigin(req, config)', 'Guard LIVE en Invitado del Bono Ilimitado');
+requireBefore(
+  unlimitedGuestBooking,
+  'assertPaymentOrigin(req, config)',
+  'const supabase = createAdminClient(config)',
+  'Orden del guard LIVE en Invitado del Bono Ilimitado',
+);
 
 requireBefore(
   deleteAccount,
@@ -211,6 +275,58 @@ for (const rpc of [
 ]) {
   requireText(migration, `function public.${rpc}`, `Migración ${rpc}`);
 }
+for (const expected of [
+  'class_credit_packs',
+  'unlimited_membership_periods',
+  "when 'clase_suelta' then 1",
+  "at time zone 'Europe/Madrid'",
+  'membership_month',
+  'es_especial',
+  'tipos_clases_categoria_check',
+  "v_is_special := v_class_type = 'taller'",
+  'interval \'60 days\'',
+  'function public.reservar_invitado_ilimitado',
+  'function public.registrar_descuento_primera_consulta',
+]) {
+  requireText(packsMigration, expected, `Migración de packs 6.9`);
+}
+for (const [expected, label] of [
+  ["'isabel_pni_1a'", 'tipo de compra Isabel PNI inicial'],
+  ["'isabel_pni_sig'", 'tipo de compra Isabel PNI sucesiva'],
+  ["p_purchase_type = 'isabel_pni_1a' and p_amount_total is distinct from 8000", 'importe Isabel PNI inicial'],
+  ["p_purchase_type = 'isabel_pni_sig' and p_amount_total is distinct from 6000", 'importe Isabel PNI sucesiva'],
+]) {
+  requireText(consultationBillingMigration, expected, `Migración de consultas: ${label}`);
+}
+const ownerShapeBlock = consultationBillingMigration.match(
+  /drop constraint if exists stripe_purchases_owner_shape_check;[\s\S]*?add constraint stripe_purchases_owner_shape_check check \([\s\S]*?\n\s*\);/,
+)?.[0] || '';
+for (const expected of [
+  'is_guest',
+  'user_id is null',
+  'purchase_type in (',
+  "'clase_suelta'",
+  "'miriam_psico_individual_1a'",
+  "'miriam_psico_individual_sig'",
+  "'miriam_psico_pareja_1a'",
+  "'miriam_psico_pareja_sig'",
+  "'silvia_ayurveda_1a'",
+  "'silvia_ayurveda_sig'",
+  "'isabel_pni_1a'",
+  "'isabel_pni_sig'",
+  'or not is_guest',
+]) {
+  requireText(ownerShapeBlock, expected, 'Owner shape de consultas de invitado');
+}
+forbid(ownerShapeBlock, /silvia_ayurveda_bono(?:3|6)/, 'Owner shape sin bonos de consulta para invitados');
+const isabelCreditBlock = consultationBillingMigration.match(
+  /elsif p_purchase_type in \(\s*'miriam_psico_individual_1a',[\s\S]*?'isabel_pni_1a',[\s\S]*?'isabel_pni_sig'\s*\) then[\s\S]*?get diagnostics v_profile_updated = row_count;/,
+)?.[0] || '';
+requireText(isabelCreditBlock, 'set saldo_psicologia = saldo_psicologia + 1', 'Crédito de consultas de Isabel');
+requireText(frontendSources[1], 'role="progressbar" aria-label="Clases utilizadas"', 'Progreso de consumo en el perfil');
+requireText(frontendSources[1], 'role="progressbar" aria-label="Tiempo transcurrido del mes"', 'Progreso del mes natural en el perfil');
+requireText(frontendSources[1], 'membership_month: membershipMonth', 'Mes natural enviado desde el perfil');
+requireText(frontendSources[0], '60 días naturales desde la compra', 'Caducidad de clase suelta visible en tarifas');
 requireText(migration, 'enable row level security', 'RLS Stripe');
 requireText(config, '[functions.stripe-webhook]', 'Configuración webhook');
 requireText(config, 'verify_jwt = false', 'Configuración JWT');

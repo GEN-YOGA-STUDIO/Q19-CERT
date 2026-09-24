@@ -12,9 +12,11 @@ const { descriptions, getEnglishProfile, repairLegacyDescription } = teacherProf
 const angel = descriptions.angel;
 const silvia = descriptions.silvia;
 
-assert.match(angel, /LUGAR DE NACIMIENTO: La Roda \(Albacete\)/);
+assert.match(angel, /SOBRE MÍ:\nLos últimos 6 años me dedico al estudio/);
 assert.doesNotMatch(angel, /\bNinguna\b/i);
-assert.match(angel, /TITULACIONES:\nBaso mi aprendizaje/);
+assert.match(angel, /TITULACIONES:\nMi formación es constante/);
+assert.match(angel, /ÁMBITOS DE SESIÓN:\nLa práctica se basa en el ajuste preciso/);
+
 
 for (const invalidCopy of [
   /personal Y/,
@@ -45,9 +47,15 @@ for (const area of [
 
 const repairedAngel = repairLegacyDescription({
   nombre: 'Ángel Javier',
+  especialidad: 'Yoga para hombres & Yoga terapéutico | clases',
   descripcion: 'LUGAR DE NACIMIENTO: La Roda\nTITULACIONES:\nNinguna. Baso mi aprendizaje en la práctica.'
 });
 assert.equal(repairedAngel.descripcion, angel);
+assert.equal(repairedAngel.especialidad, 'Yoga para hombres & Yoga para Todos | clases');
+
+const miriam = descriptions.miriam;
+assert.match(miriam, /LUGAR DE NACIMIENTO:\s*Albacete \(Espa[ñn]a\)/i);
+assert.doesNotMatch(miriam, /Cuenca/i);
 
 const repairedSilvia = repairLegacyDescription({
   nombre: 'Silvia',
@@ -55,42 +63,146 @@ const repairedSilvia = repairLegacyDescription({
 });
 assert.equal(repairedSilvia.descripcion, silvia);
 
+const repairedMiriam = repairLegacyDescription({
+  nombre: 'Miriam',
+  descripcion: 'LUGAR DE NACIMIENTO: Cuenca (España)\nTITULACIONES:\nGraduada en Psicología por la Universidad de Valencia'
+});
+assert.match(repairedMiriam.descripcion, /LUGAR DE NACIMIENTO:\s*Albacete \(Espa[ñn]a\)/i);
+assert.doesNotMatch(repairedMiriam.descripcion, /Cuenca/i);
+
 const angelEnglish = getEnglishProfile({ nombre: 'Ángel Javier' });
-assert.match(angelEnglish.descripcion, /La Roda \(Albacete\)/);
+assert.match(angelEnglish.descripcion, /ABOUT ME:\nFor the past 6 years/);
 assert.doesNotMatch(angelEnglish.descripcion, /\bNone\b/);
-assert.match(angelEnglish.descripcion, /I SUPPORT YOU:/);
+assert.doesNotMatch(angelEnglish.descripcion, /\bSeptember\b/);
+assert.match(angelEnglish.descripcion, /SESSION FOCUS:/);
+assert.equal(angelEnglish.especialidad, 'Yoga for Men & Yoga for Everyone | classes');
+
 
 const miriamEnglish = getEnglishProfile({ email: 'miriam_profesora@genyoga.studio' });
 assert.match(miriamEnglish.descripcion, /self-awareness/);
 assert.doesNotMatch(miriamEnglish.descripcion, /autoconcern/);
+assert.match(miriamEnglish.descripcion, /PLACE OF BIRTH:\s*Albacete \(Spain\)/i);
+assert.doesNotMatch(miriamEnglish.descripcion, /Cuenca/i);
 
-const [maestros, profile, migration] = await Promise.all([
+const isabelKey = teacherProfiles.getKey({ email: 'isarodriguez.pni@gmail.com' });
+assert.equal(isabelKey, 'isabel', 'isarodriguez.pni@gmail.com debe resolver a la clave isabel');
+
+const silviaKey = teacherProfiles.getKey({ email: 'sil-hada@hotmail.com' });
+assert.equal(silviaKey, 'silvia', 'sil-hada@hotmail.com debe resolver a la clave silvia');
+
+// Verify parseBio accurately parses teacher sections without duplicate content
+const { parseBio } = teacherProfiles;
+const parsedSilvia = parseBio(silvia);
+assert.equal(parsedSilvia.lugar, 'Madrid');
+assert.equal(parsedSilvia.titulos.length, 2, 'Silvia sólo debe tener 2 titulaciones');
+assert.ok(parsedSilvia.titulos[0].includes('AIPYS'), 'Primera titulación de Silvia es AIPYS');
+assert.ok(parsedSilvia.titulos[1].includes('Ayurveda'), 'Segunda titulación de Silvia es Ayurveda');
+assert.ok(parsedSilvia.sobreMi.length > 1, 'Silvia debe tener párrafos de Sobre mí');
+assert.ok(parsedSilvia.teAcompano.length > 5, 'Silvia debe tener ámbitos de sesión');
+assert.doesNotMatch(parsedSilvia.titulos.join('\n'), /Es profesora de Yoga/i, 'Titulaciones de Silvia no debe contener su bio');
+assert.doesNotMatch(parsedSilvia.titulos.join('\n'), /Dolor de espalda/i, 'Titulaciones de Silvia no debe contener ámbitos de sesión');
+
+const parsedMiriam = parseBio(descriptions.miriam);
+assert.equal(parsedMiriam.lugar, 'Albacete (España)');
+assert.equal(parsedMiriam.titulos.length, 10);
+assert.ok(parsedMiriam.sobreMi.length >= 4);
+assert.equal(parsedMiriam.teAcompano.length, 10);
+
+const [maestros, profile, clases, migration, mergeMigration] = await Promise.all([
   readFile(path.join(root, 'maestros.html'), 'utf8'),
   readFile(path.join(root, 'profile.html'), 'utf8'),
-  readFile(path.join(root, 'supabase', 'migrations', '202607240001_professional_descriptions_6_7.sql'), 'utf8'),
+  readFile(path.join(root, 'clases.html'), 'utf8'),
+  readFile(path.join(root, 'supabase', 'migrations', '202608030001_angel_profile_schedule_6_8.sql'), 'utf8'),
+  readFile(path.join(root, 'supabase', 'migrations', '202609020008_merge_teacher_profiles_isabel_silvia.sql'), 'utf8'),
 ]);
 
 for (const page of [maestros, profile]) {
-  assert.match(page, /teacher-profiles\.js\?v=6\.7/);
+  assert.match(page, /teacher-profiles\.js\?v=\d+\.\d+/);
 }
+
+// Check teacher image cutouts and assets
+// Solo assets referenciados por las páginas (cutouts recortada + tarjetas).
+// NOTA: img/profes/* se eliminó el 2026-09-22 por no estar referenciado en
+// ningún HTML/JS/CSS (las tarjetas usan los cutouts recortada).
+const requiredImages = [
+  'maestra-isabel-recortada.webp',
+  'maestro-angel-recortado.webp',
+  'maestra-miriam-recortada.webp',
+  'maestra-silvia-recortada.webp',
+  'maestra-yanira-recortada.webp',
+  'isabel-pni.jpg',
+  'clases-hombres.jpg',
+  'clases-para-todos.jpg',
+];
+
+for (const imgName of requiredImages) {
+  const imgPath = path.join(root, 'img', imgName);
+  const exists = await readFile(imgPath).then(() => true).catch(() => false);
+  assert.ok(exists, `Falta la imagen de profesor requerida: img/${imgName}`);
+}
+
+assert.match(maestros, /updated\.foto_cutout = 'img\/maestra-isabel-recortada\.webp'/);
+assert.match(maestros, /updated\.foto_cutout = 'img\/maestro-angel-recortado\.webp'/);
+assert.match(maestros, /updated\.foto_cutout = 'img\/maestra-miriam-recortada\.webp'/);
+assert.match(maestros, /updated\.foto_cutout = 'img\/maestra-silvia-recortada\.webp'/);
+assert.match(maestros, /updated\.foto_cutout = 'img\/maestra-yanira-recortada\.webp'/);
+assert.doesNotMatch(maestros, /filter:\s*grayscale\(1\)/);
+assert.match(maestros, /email:\s*'isarodriguez\.pni@gmail\.com'/);
+assert.match(maestros, /email:\s*'sil-hada@hotmail\.com'/);
+assert.match(clases, /src="img\/isabel-pni\.jpg(?:\?[^"]*)?"/);
+assert.match(profile, /isarodriguez\.pni@gmail\.com/);
+assert.match(profile, /sil-hada@hotmail\.com/);
 
 assert.doesNotMatch(maestros, /summarizeModalText|summarizeModalItems|moreAreas|moreQualifications/);
 assert.doesNotMatch(maestros, /\+\$\{remaining\}|visible\.join\(['"] · ['"]\)/);
 assert.match(maestros, /entries\.map\(item => `<p class="teacher-modal__section-text">/);
+const galleryRenderer = maestros.match(/function renderProfesionalesLanding[\s\S]*?function parseBio/)?.[0] || '';
+assert.doesNotMatch(galleryRenderer, /renderTeacherClassLinks\(prof,\s*['"]card['"]\)/);
+assert.match(maestros, /renderTeacherClassLinks\(prof,\s*['"]modal['"]\)/);
+assert.match(maestros, /\.teachers-gallery__grid\s*\{[\s\S]*?align-items:\s*start;/);
+assert.doesNotMatch(maestros, /\.teachers-gallery__grid--4\s*\{[\s\S]*?align-items:\s*flex-end;/);
+assert.match(maestros, /\.teacher-modal__section-title\s*\{[\s\S]*?font-family:\s*['"]Ubuntu['"][\s\S]*?font-weight:\s*700;/);
+assert.match(maestros, /\.teacher-modal__section-text\s*\{[\s\S]*?font-family:\s*['"]Montserrat Arabic['"][\s\S]*?font-weight:\s*300;/);
+assert.match(maestros, /id:\s*['"]isabel-local['"]/);
+assert.match(maestros, /Psiconeuroinmunología Clínica \(PNI\) \| consultas/);
+assert.match(maestros, /orderedKeys = \['angel', 'miriam', 'silvia', 'isabel', 'yanira'\]/);
+assert.match(maestros, /identity\.includes\('isabel'\)/);
 
 assert.doesNotMatch(profile, /function truncateTextProfile/);
 assert.match(profile, /const bioText = parsed\.sobreMi\[0\]/);
 assert.match(profile, /parsed\.titulos\.map\(t => `<p>\$\{escapeHtml\(t\)\}<\/p>`\)/);
-assert.match(profile, /\(\?:\^\|\\n\)\\s\*\(LUGAR DE NACIMIENTO/);
+assert.match(profile, /function getTeacherPhotoFallback/);
+assert.match(profile, /img\/maestro-angel-recortado\.webp/);
+assert.match(profile, /img\/maestra-silvia-recortada\.webp/);
+assert.match(profile, /img\/maestra-miriam-recortada\.webp/);
+assert.match(profile, /img\/maestra-isabel-recortada\.webp/);
+assert.match(profile, /img\/maestra-yanira-recortada\.webp/);
+assert.match(profile, /function generarHuecosConsultasVirtuales/);
+assert.match(profile, /function abrirModalComprarConsultas/);
+assert.match(profile, /function abrirCompraYReservaConsulta/);
+assert.match(profile, /function iniciarCheckoutConsultaStripe/);
+assert.match(profile, /COMPRAR Y RESERVAR/);
 
 for (const expected of [
   'La Roda (Albacete)',
-  'práctica personal y terapeuta Ayurveda',
-  'sistema nervioso',
-  'Mi trayectoria profesional comenzó',
-  'considero que mi esterilla es mi mejor guía',
+  'Yoga para hombres & Yoga para Todos',
+  'Además, estoy cursando una mentoría para la certificación como profesor de yoga Iyengar.',
+  "set nombre = 'Yoga para Todos'",
+  'extract(isodow from c.fecha_inicio at time zone \'Europe/Madrid\') = 5',
 ]) {
   assert.ok(migration.includes(expected), `La migración no contiene: ${expected}`);
 }
 
-console.log('Teacher profile checks passed for Ángel Javier, Silvia, Miriam and Yanira.');
+for (const expected of [
+  'isarodriguez.pni@gmail.com',
+  'sil-hada@hotmail.com',
+  'Psiconeuroinmunología Clínica (PNI) | consultas, psicologia, nutricion',
+  'Hatha & Iyengar Yoga, Ayurveda | clases, consultas, nutricion',
+  'Yoga para hombres & Yoga para Todos | clases',
+  'Vinyasa & Restaurativa | clases, talleres',
+  'delete from public.profesionales where id = v_dup_id',
+]) {
+  assert.ok(mergeMigration.includes(expected), `La migración de fusión no contiene: ${expected}`);
+}
+
+console.log('Teacher profile checks passed for Ángel Javier, Silvia, Miriam, Isabel and Yanira.');

@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="application-version" content="15.1">
+    <meta name="application-version" content="17.3">
     <meta name="description" content="Descubre las clases de yoga de GEN Yoga en Albacete, sus estilos, horarios y condiciones de reserva.">
-    <link rel="icon" type="image/png" sizes="64x64" href="img/favicon-64.png?v=15.1">
-    <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png?v=15.1">
+    <link rel="icon" type="image/png" sizes="64x64" href="img/favicon-64.png?v=17.3">
+    <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png?v=17.3">
     <title>GEN Yoga | Clases</title>
 
     <!-- Rendimiento, SEO y tarjetas sociales -->
@@ -25,10 +25,10 @@
     <meta name="twitter:card" content="summary_large_image" />
     
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.0"></script>
-    <script src="i18n.js?v=15.1"></script>
-    <script src="capacitor-bridge.js?v=15.1" defer></script>
+    <script src="i18n.js?v=17.3"></script>
+    <script src="capacitor-bridge.js?v=17.3" defer></script>
     
-    <link rel="stylesheet" href="tailwind-compiled.css?v=15.1" />
+    <link rel="stylesheet" href="tailwind-compiled.css?v=17.3" />
     <style>
         /* Reset and Lock Viewports for Fixed Presentation */
         html, body {
@@ -242,6 +242,12 @@
             will-change: transform;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
+            /* Column flexbox so every card always fills exactly the deck height.
+               Without this each .folder-body had an auto (content-driven) height:
+               the card with the longest text (Miriam) ended lower than the rest and
+               its brown background kept peeking underneath the active folder. */
+            display: flex;
+            flex-direction: column;
         }
 
         .folder-card-container.is-active,
@@ -257,6 +263,13 @@
             margin-top: -1px;
             box-shadow: 0 20px 45px -15px rgba(38, 22, 12, 0.15);
             z-index: 20;
+            /* Stretch to the remaining deck height so all folder bodies share the
+               exact same box (and the same bottom edge), regardless of how long
+               their content is. Any overflow is clipped instead of spilling over
+               the cards underneath. */
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow: hidden;
         }
 
         /* Carpetas con pestaña en la izquierda: esquina superior izquierda recta */
@@ -501,9 +514,11 @@
             animation: soft-pulse 2.2s infinite ease-in-out;
         }
     </style>
-    <link rel="stylesheet" href="public-calendar.css?v=15.1">
-</head>
+    <link rel="stylesheet" href="public-calendar.css?v=17.3">
+  <meta name="robots" content="noindex,nofollow">
+  </head>
 <body class="subpixel-antialiased selection:bg-mutedgold selection:text-cocoa font-sans bg-[#f8f6f2] overflow-x-hidden">
+  <div id="gy-cert-banner" aria-hidden="true" style="position:fixed;top:0;left:0;right:0;z-index:2147483647;background:rgba(38,22,12,.92);color:#f8f6f2;font:600 11px/22px system-ui,-apple-system,sans-serif;text-align:center;letter-spacing:.04em;pointer-events:none">ENTORNO DE PRUEBAS (cert) · misma base de datos que producción · compras desactivadas aquí</div>
     <!-- Backgrounds (Fades in/out behind the cards) -->
     <div class="fixed inset-0 z-0 overflow-hidden pointer-events-none">
         <div id="bg-cream" class="absolute inset-0 bg-[#f8f6f2] transition-opacity duration-300"></div>
@@ -604,11 +619,11 @@
                         <div onclick="scrollToSlide(2)" class="absolute left-[48%] top-0 w-[24%] h-full cursor-pointer z-30"></div>
                         <div onclick="scrollToSlide(3)" class="absolute left-[72%] top-0 w-[28%] h-full cursor-pointer z-30"></div>
                     </div>
-                    <div onclick="window.GENPublicCalendar?.open({ style: 'vinyasa' })"
+                    <div onclick="window.GENPublicCalendar?.open({ style: 'power-vinyasa' })"
                         class="folder-body flex flex-col md:flex-row p-6 md:p-10 gap-6 md:gap-10 cursor-pointer"
                         style="background-color: #7a5246 !important; background: #7a5246 !important;">
                         <div class="w-full md:w-[45%] aspect-[4/3] md:h-[320px] overflow-hidden rounded-2xl shadow-inner relative bg-cocoa/10 pointer-events-none">
-                            <img src="img/clases-vinyasa.jpg" alt="Power Vinyasa" class="w-full h-full object-cover">
+                            <img src="img/clases-vinyasa.webp" alt="Power Vinyasa" class="w-full h-full object-cover">
                         </div>
                         <div class="w-full md:w-[55%] flex flex-col justify-center text-left text-white pointer-events-none">
                             <span class="text-white/60 text-[10px] md:text-xs uppercase tracking-[0.2em] font-bold mb-2" data-i18n="classes_vinyasa_tagline">¿Listx para fluir con energía y fuerza?</span>
@@ -621,29 +636,29 @@
                     </div>
                 </div>
 
-                <!-- CARD 2 (Yoga para Hombres) -->
+                <!-- CARD 2 (Yoga Alineación) -->
                 <div id="card-2" class="folder-card-container" style="transform: translateY(105%); opacity: 0; z-index: 21;">
                     <div class="relative w-full h-[18px] md:h-[36px] overflow-hidden select-none">
                         <svg viewBox="0 0 896 36" class="w-full h-full block" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M 216 36 L 216 12 Q 216 0 228 0 L 396 0 Q 408 0 408 12 C 408 24 420 36 432 36 L 896 36 L 896 37 L 0 37 L 0 36 Z" fill="#ae5947" />
-                            <text x="312" y="23" fill="#f8f6f2" font-size="9.45" font-family="system-ui, -apple-system, sans-serif" font-weight="900" text-anchor="middle" letter-spacing="1.8" data-i18n="classes_tab_hombres">HOMBRES</text>
+                            <text x="312" y="23" fill="#f8f6f2" font-size="9.45" font-family="system-ui, -apple-system, sans-serif" font-weight="900" text-anchor="middle" letter-spacing="1.8" data-i18n="classes_tab_alineacion">ALINEACIÓN</text>
                         </svg>
                         <div onclick="scrollToSlide(0)" class="absolute left-0 top-0 w-[24%] h-full cursor-pointer z-30"></div>
                         <div onclick="scrollToSlide(1)" class="absolute left-[24%] top-0 w-[24%] h-full cursor-pointer z-30"></div>
                         <div onclick="scrollToSlide(2)" class="absolute left-[48%] top-0 w-[24%] h-full cursor-pointer z-30"></div>
                         <div onclick="scrollToSlide(3)" class="absolute left-[72%] top-0 w-[28%] h-full cursor-pointer z-30"></div>
                     </div>
-                    <div onclick="window.GENPublicCalendar?.open({ style: 'yoga-para-hombres' })"
+                    <div onclick="window.GENPublicCalendar?.open({ style: 'yoga-alineacion' })"
                         class="folder-body flex flex-col md:flex-row p-6 md:p-10 gap-6 md:gap-10 cursor-pointer"
                         style="background-color: #ae5947 !important; background: #ae5947 !important;">
                         <div class="w-full md:w-[45%] aspect-[4/3] md:h-[320px] overflow-hidden rounded-2xl shadow-inner relative bg-cocoa/10 pointer-events-none">
-                            <img src="img/clases-hombres.jpg" alt="Yoga para Hombres" loading="lazy" decoding="async" class="w-full h-full object-cover">
+                            <img src="img/clases-hombres.jpg" alt="Yoga Alineación" loading="lazy" decoding="async" class="w-full h-full object-cover">
                         </div>
                         <div class="w-full md:w-[55%] flex flex-col justify-center text-left text-white pointer-events-none">
-                            <span class="text-white/60 text-[10px] md:text-xs uppercase tracking-[0.2em] font-bold mb-2" data-i18n="classes_hombres_tagline">Fuerza, calma y espacio propio.</span>
-                            <h2 class="brand-font text-3xl md:text-5xl font-black uppercase tracking-wide mb-3 leading-none" data-i18n="classes_card_hombres_title">Yoga para Hombres</h2>
-                            <p class="text-white/80 text-xs md:text-sm lg:text-base leading-relaxed font-light" data-i18n="classes_card_hombres_desc">
-                                Un espacio pensado para fortalecer cuerpo y mente sin presiones ni comparaciones. Diseñado teniendo en cuenta la anatomía y movilidad masculina: libera sobrecargas, trabaja la flexibilidad, la resistencia y la respiración consciente en un ambiente directo y cercano.
+                            <span class="text-white/60 text-[10px] md:text-xs uppercase tracking-[0.2em] font-bold mb-2" data-i18n="classes_alineacion_tagline">Ajuste preciso, fuerza y consciencia corporal.</span>
+                            <h2 class="brand-font text-3xl md:text-5xl font-black uppercase tracking-wide mb-3 leading-none" data-i18n="classes_card_alineacion_title">Yoga Alineación</h2>
+                            <p class="text-white/80 text-xs md:text-sm lg:text-base leading-relaxed font-light" data-i18n="classes_card_alineacion_desc">
+                                Una práctica basada en el ajuste preciso y la correcta alineación del cuerpo. Adaptada a las condiciones de cada persona para profundizar de forma segura y consciente en cada asana, liberar sobrecargas y cultivar presencia y estabilidad.
                             </p>
                             <span class="gy-folder-calendar-link" data-i18n="classes_calendar_btn">Ver horario semanal</span>
                         </div>
@@ -695,7 +710,7 @@
                         class="folder-body flex flex-col md:flex-row p-6 md:p-10 gap-6 md:gap-10 cursor-pointer"
                         style="background-color: #ee9785 !important; background: #ee9785 !important;">
                         <div class="w-full md:w-[45%] aspect-[4/3] md:h-[320px] overflow-hidden rounded-2xl shadow-inner relative bg-cocoa/10 pointer-events-none">
-                            <img src="img/clases-restaurativa.jpg" alt="Yoga Restaurativo" loading="lazy" decoding="async" class="w-full h-full object-cover">
+                            <img src="img/clases-restaurativa.webp" alt="Yoga Restaurativo" loading="lazy" decoding="async" class="w-full h-full object-cover">
                         </div>
                         <div class="w-full md:w-[55%] flex flex-col justify-center text-left text-white pointer-events-none">
                             <span class="text-white/60 text-[10px] md:text-xs uppercase tracking-[0.2em] font-bold mb-2" data-i18n="classes_restaurativa_tagline">Suelta el día, calma tu sistema nervioso.</span>
@@ -735,7 +750,7 @@
                             <span class="consultation-card__eyebrow">Psicoterapia · Miriam Alfaro</span>
                             <h2 class="consultation-card__title brand-font text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black uppercase tracking-normal mb-3">Psicología</h2>
                             <p class="consultation-card__description text-xs md:text-sm lg:text-base leading-relaxed">
-                                Acompañamiento psicoterapéutico individual y de pareja. Un espacio seguro y de confianza donde trabajar tu bienestar emocional, gestionar la ansiedad, reconectar con tu autoestima y fortalecer tus vínculos. Consulta el calendario para ver disponibilidad y reservar tu cita.
+                                Acompañamiento psicoterapéutico individual y de pareja, sesiones grupales (<strong>🫂 Grupo Terapéutico</strong>: cerrado, continuado y multitemático, miércoles 11:30 h; <strong>🌱 Grupo de Autoayuda</strong>: temático con objetivo compartido, martes 11:30 h; ambos de 2 h y 30 €/sesión) y talleres vivenciales. Espacios de confianza e intimidad donde cuidar de ti. Consulta el calendario para reservar tu plaza.
                             </p>
                             <span class="gy-folder-calendar-link">Ver disponibilidad</span>
                         </div>
@@ -822,7 +837,7 @@
                         style="background-color: #c07238 !important; background: #c07238 !important;"
                         role="button" tabindex="0" aria-label="Ver calendario de talleres intensivos">
                         <div class="w-full md:w-[45%] aspect-[4/3] md:h-[320px] overflow-hidden rounded-2xl shadow-inner relative bg-cocoa/10 pointer-events-none">
-                            <img src="img/clases-vinyasa.jpg" alt="Talleres Intensivos" loading="lazy" decoding="async" class="w-full h-full object-cover">
+                            <img src="img/clases-vinyasa.webp" alt="Talleres Intensivos" loading="lazy" decoding="async" class="w-full h-full object-cover">
                         </div>
                         <div class="w-full md:w-[55%] flex flex-col justify-center text-left text-white pointer-events-none">
                             <span class="text-white/70 text-[10px] md:text-xs uppercase tracking-[0.2em] font-bold mb-2" data-i18n="classes_taller_int_tagline">Profundización, práctica y autoconocimiento.</span>
@@ -948,10 +963,10 @@
                 <!-- Right Column (Stacked Images: Arms & Bowls) -->
                 <div id="cta-right-imgs" class="hidden md:flex w-1/4 flex-col gap-4 max-w-[190px] opacity-0 transform translate-y-[120px] transition-all duration-500">
                     <div class="aspect-square overflow-hidden rounded-2xl shadow-lg border border-white/10 bg-white/5">
-                        <img src="img/clases-restaurativa.jpg" alt="Yoga Restaurativo" loading="lazy" decoding="async" class="w-full h-full object-cover brightness-90 opacity-90">
+                        <img src="img/clases-restaurativa.webp" alt="Yoga Restaurativo" loading="lazy" decoding="async" class="w-full h-full object-cover brightness-90 opacity-90">
                     </div>
                     <div class="aspect-square overflow-hidden rounded-2xl shadow-lg border border-white/10 bg-white/5">
-                        <img src="img/clases-vinyasa.jpg" alt="Power Vinyasa" loading="lazy" decoding="async" class="w-full h-full object-cover brightness-95 opacity-90">
+                        <img src="img/clases-vinyasa.webp" alt="Power Vinyasa" loading="lazy" decoding="async" class="w-full h-full object-cover brightness-95 opacity-90">
                     </div>
                 </div>
 
@@ -994,7 +1009,7 @@
             </div>
             <div class="flex flex-col items-end text-right text-sm gap-0.5 tracking-[0.1em] font-normal text-white">
                 <a href="politica-privacidad.html" class="hover:text-sand transition underline decoration-transparent hover:decoration-sand" data-i18n="footer_privacy">Política de privacidad</a>
-                <span class="opacity-60 text-[10px]">v15.1 | @2026 Gen Yoga</span>
+                <span class="opacity-60 text-[10px]">v17.3 | @2026 Gen Yoga</span>
             </div>
         </div>
     </div>
@@ -1275,7 +1290,7 @@ async function loadPublicBookingPolicies() {
         );
         lastReservaVal = normalisePolicyHours(
             data?.find(c => c.clave === 'horas_limite_reserva')?.valor,
-            '12'
+            '24'
         );
         updatePolicyText();
     } catch (err) {
@@ -1531,8 +1546,8 @@ window.switchCategoryDeck = function(cat) {
 };
 
 </script>
-    <script src="public-calendar.js?v=15.1"></script>
-    <script src="facilities-carousel.js?v=15.1"></script>
+    <script src="public-calendar.js?v=17.3"></script>
+    <script src="facilities-carousel.js?v=17.3"></script>
     <script>
         window.GENPublicCalendar?.init({ client });
     </script>

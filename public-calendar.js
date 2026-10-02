@@ -18,6 +18,7 @@
         'tipo_clase_id',
         'activa',
         'es_especial',
+        'es_gratuita',
         'companion_modality',
         'profesionales!inner(id,nombre,apellidos,color,visible_publico)'
     ].join(',');
@@ -108,11 +109,13 @@
             vinyasa: 'Power Vinyasa',
             powerVinyasa: 'Power Vinyasa',
             restorative: 'Yoga Restaurativo',
-            men: 'Yoga para Hombres',
+            men: 'Yoga Alineación',
+            alignment: 'Yoga Alineación',
             everyone: 'Yoga para Todos',
             therapeutic: 'Yoga terapéutico',
             silviaYoga: 'Yoga con Silvia',
             ayurveda: 'Yoga y Ayurveda',
+            introductory: 'Sesión Introductoria',
             special: 'Talleres',
             filterPractice: 'Filtrar por práctica',
             filterSpecialist: 'Filtrar por profesional',
@@ -179,11 +182,13 @@
             vinyasa: 'Power Vinyasa',
             powerVinyasa: 'Power Vinyasa',
             restorative: 'Restorative Yoga',
-            men: 'Yoga for Men',
+            men: 'Alignment Yoga',
+            alignment: 'Alignment Yoga',
             everyone: 'Yoga for Everyone',
             therapeutic: 'Therapeutic yoga',
             silviaYoga: 'Yoga with Silvia',
             ayurveda: 'Yoga and Ayurveda',
+            introductory: 'Introductory Session',
             special: 'Workshops',
             filterPractice: 'Filter by practice',
             filterSpecialist: 'Filter by specialist',
@@ -220,7 +225,10 @@
         16 * 60 + 30,
         18 * 60
     ]);
-    const silviaConsultationAnchorDate = '2026-06-19';
+    // Silvia ofrece consultas de Ayurveda todos los viernes (15:00, 16:30 y 18:00).
+    // La paridad quincenal antigua (ancla 2026-06-19) se retiró en v16.3: el estudio
+    // programa los viernes que necesita y el calendario público muestra cada fila
+    // activa de la base de datos sin volver a filtrar por quincena.
     const consultationWeekdays = Object.freeze({
         miriam: Object.freeze([2, 3]),
         isabel: Object.freeze([2, 4])
@@ -332,13 +340,15 @@
         if (normalized.includes('introductor') || normalized.includes('bienvenida') || normalized.includes('gratis') || normalized.includes('prueba') || normalized.includes('clase abierta') || normalized.includes('abierta')) return 'sesion-introductoria';
         if (normalized.includes('power') && normalized.includes('vinyasa')) return 'power-vinyasa';
         if (normalized.includes('restaur') || normalized.includes('suave')) return 'restaurativa';
-        if (normalized.includes('hombre')) return 'yoga-para-hombres';
+        if (normalized.includes('alineac') || normalized.includes('hombre')) return 'yoga-alineacion';
         if (normalized.includes('para todos') || normalized.includes('for everyone')) return 'yoga-para-todos';
+        if (normalized.includes('autoayuda')) return 'grupo-autoayuda';
+        if (normalized.includes('grupo') && normalized.includes('terapeut')) return 'grupo-terapeutico';
         if (normalized.includes('terapeut')) return 'yoga-terapeutico';
         if (normalized.includes('aryuved') || normalized.includes('ayurved')) return 'ayurveda';
         if (normalized.includes('silvia') && normalized.includes('yoga')) return 'yoga-con-silvia';
         if (normalized.includes('taller') || normalized.includes('especial')) return 'taller';
-        if (normalized.includes('vinyasa')) return 'vinyasa';
+        if (normalized.includes('vinyasa')) return 'power-vinyasa';
         return slugify(normalized);
     }
 
@@ -347,6 +357,7 @@
         const normalized = stripDiacritics(original).toLowerCase().replace(/\s+/g, ' ');
         if (normalized === 'yoga aryuveda' || normalized === 'yoga ayurveda') return 'Yoga y Ayurveda';
         if (normalized === 'yoga (silvia) consultas') return 'Yoga con Silvia';
+        if (normalized.includes('hombres') || normalized.includes('hombre')) return 'Yoga Alineación';
         return original;
     }
 
@@ -381,10 +392,9 @@
         }
 
         if (slug === 'silvia') {
-            const anchor = new Date(`${silviaConsultationAnchorDate}T12:00:00Z`);
-            const requested = new Date(`${validDate}T12:00:00Z`);
-            const daysFromAnchor = Math.round((requested.getTime() - anchor.getTime()) / 86_400_000);
-            return weekday === 5 && daysFromAnchor % 14 === 0
+            // v16.3: consultas todos los viernes, sin paridad quincenal. La base de
+            // datos es la fuente de verdad: si el estudio crea el hueco, se muestra.
+            return weekday === 5
                 ? silviaConsultationSlotStartMinutes
                 : [];
         }
@@ -398,9 +408,14 @@
     function isCanonicalConsultationClass(item) {
         if (!item) return false;
         if (item?.professor?.slug === 'silvia') {
+            // v16.3 (causa raíz del 30-oct invisible): el calendario público no debe
+            // revalidar reglas de negocio sobre filas ya creadas por el estudio.
+            // Toda consulta real de Silvia en base de datos se muestra; la paridad
+            // quincenal y los horarios de reserva se controlan al reservar, no al ver.
             return item.classType === 'nutricion'
-                && item.durationMinutes === 90
-                && consultationStartMinutesFor(item.professor, item.dateKey).includes(item.startMinutes);
+                || item.classType === 'consulta'
+                || item.classType === 'consulta_grupal'
+                || item.classType === 'psicologia';
         }
         if (item?.professor?.slug === 'angel-javier') {
             if (item.startMinutes >= 1260) return false;
@@ -527,6 +542,13 @@
         const professional = Array.isArray(raw?.profesionales)
             ? raw.profesionales[0]
             : raw?.profesionales;
+        const professionalVisible = Array.isArray(raw?.profesionales)
+            ? raw.profesionales[0]?.visible_publico
+            : raw?.profesionales?.visible_publico;
+        // v16.3: la rama de consultas no filtraba por visibilidad y mostraba
+        // huecos de profesionales ocultos. Solo se excluye el 'false' explícito
+        // para no alterar las filas del RPC (ya filtradas en servidor).
+        if (professionalVisible === false) return null;
         const professor = {
             id: safePositiveInteger(raw?.profesor_id ?? professional?.id),
             nombre: String(raw?.profesor_nombre ?? professional?.nombre ?? '').trim(),
@@ -545,7 +567,10 @@
         const isClaseEspecial = !isIntroOrOpen && (
             rawClassType === 'clase_especial'
             || rawClassType === 'especial'
+            || rawName.toLowerCase().includes('flow y meditación')
+            || rawName.toLowerCase().includes('flow y meditacion')
             || rawName.toLowerCase().includes('yoga y meditación')
+            || rawName.toLowerCase().includes('yoga y meditacion')
             || (raw?.es_especial === true && !/taller|masterclass/i.test(rawName) && raw?.duracion_minutos === 75)
         );
         const isTaller = !isIntroOrOpen && !isClaseEspecial && (
@@ -581,12 +606,14 @@
         const mins = madridStart.minutes % 60;
         const timeStr = String(hours).padStart(2, '0') + ':' + String(mins).padStart(2, '0');
         const profSlug = professor.slug || '';
-        const isOfficialFree = (
-            (madridStart.dateKey === '2026-08-30' && (timeStr === '10:00' || timeStr === '12:00') && profSlug.includes('angel')) ||
+        const isOfficialFree = Boolean(
+            raw?.es_gratuita === true ||
+            isIntroOrOpen ||
+            ((madridStart.dateKey === '2026-08-30' && (timeStr === '10:00' || timeStr === '12:00') && profSlug.includes('angel')) ||
             ((madridStart.dateKey === '2026-09-01' || madridStart.dateKey === '2026-09-03') && timeStr === '19:00' && profSlug.includes('yanira')) ||
             (((madridStart.dateKey === '2026-09-01' && timeStr === '20:15') || (madridStart.dateKey === '2026-09-02' && timeStr === '11:30')) && (profSlug.includes('miriam') || classType === 'psicologia')) ||
             ((madridStart.dateKey === '2026-09-18' || madridStart.dateKey === '2026-09-25') && timeStr === '11:00' && profSlug.includes('silvia')) ||
-            ((madridStart.dateKey === '2026-09-03' || madridStart.dateKey === '2026-09-22') && timeStr === '11:00' && (profSlug.includes('isabel') || classType === 'nutricion' || classType === 'psicologia'))
+            ((madridStart.dateKey === '2026-09-03' || madridStart.dateKey === '2026-09-22') && timeStr === '11:00' && (profSlug.includes('isabel') || classType === 'nutricion' || classType === 'psicologia')))
         );
 
         const complete = exactAvailability
@@ -627,6 +654,13 @@
             if (state.style === 'sesion-introductoria') {
                 const isIntro = item.style === 'sesion-introductoria' || String(item.name || '').toLowerCase().includes('introductoria') || String(item.name || '').toLowerCase().includes('abierta');
                 if (!isIntro) return false;
+            } else if (state.style === 'power-vinyasa' || state.style === 'vinyasa') {
+                if (item.style !== 'power-vinyasa' && item.style !== 'vinyasa') return false;
+            } else if (state.style === 'yoga-alineacion' || state.style === 'yoga-para-hombres') {
+                if (item.style !== 'yoga-alineacion' && item.style !== 'yoga-para-hombres') return false;
+            } else if (state.style === 'ayurveda') {
+                const isAyu = item.style === 'ayurveda' || String(item.name || '').toLowerCase().includes('ayurved');
+                if (!isAyu) return false;
             } else if (item.style !== state.style) {
                 return false;
             }
@@ -645,11 +679,12 @@
 
     function styleLabel(style, sourceClasses) {
         const known = {
-            'sesion-introductoria': 'Sesión Introductoria de Yoga',
+            'sesion-introductoria': text('introductory') || 'Sesión Introductoria de Yoga',
             'power-vinyasa': text('powerVinyasa'),
-            vinyasa: text('vinyasa'),
+            vinyasa: text('powerVinyasa'),
             restaurativa: text('restorative'),
-            'yoga-para-hombres': text('men'),
+            'yoga-alineacion': text('alignment'),
+            'yoga-para-hombres': text('alignment'),
             'yoga-para-todos': text('everyone'),
             'yoga-terapeutico': text('therapeutic'),
             'yoga-con-silvia': text('silviaYoga'),
@@ -659,7 +694,7 @@
         if (known[style]) return known[style];
 
         const sample = (sourceClasses || state.classes).find(item => item.style === style);
-        if (sample?.name) return sample.name;
+        if (sample?.name) return publicClassName(sample.name);
         return style
             .split('-')
             .map(word => word.charAt(0).toUpperCase() + word.slice(1))
@@ -671,6 +706,7 @@
         'power-vinyasa': '#df7fa5',
         vinyasa: '#df7fa5',
         restaurativa: '#c3b89a',
+        'yoga-alineacion': '#5A8A7A',
         'yoga-para-hombres': '#5A8A7A',
         'yoga-para-todos': '#7f9fc0',
         'yoga-terapeutico': '#68704a',
@@ -681,7 +717,7 @@
 
     function eventColor(item) {
         if (item.companionModality) return '#D97706';
-        if (state.mode === 'consultas' || item.classType === 'psicologia' || item.classType === 'nutricion' || item.classType === 'consulta') {
+        if (state.mode === 'consultas' || item.classType === 'psicologia' || item.classType === 'nutricion' || item.classType === 'consulta' || item.classType === 'consulta_grupal') {
             if (item.professor?.slug && knownTeacherColors[item.professor.slug]) return knownTeacherColors[item.professor.slug];
             if (item.professor?.color) return item.professor.color;
         }
@@ -736,6 +772,13 @@
         const now = Date.now();
         if (item.end.getTime() <= now) {
             return { disabled: true, stateClass: 'is-past', badge: text('finished'), hint: text('finished') };
+        }
+        const isGrupoMiriam = item.classType === 'consulta_grupal' || (item.name && (item.name.toLowerCase().includes('autoayuda') || (item.name.toLowerCase().includes('grupo') && item.name.toLowerCase().includes('terap'))));
+        if (isGrupoMiriam) {
+            if (item.complete === true || (Number.isFinite(item.freeSpots) && item.freeSpots <= 0)) {
+                return { disabled: true, stateClass: 'is-full gy-calendar__event-badge--occupied', badge: text('calendar_spot_occupied'), hint: text('calendar_spot_occupied') };
+            }
+            return { disabled: false, stateClass: '', badge: '30 € · Sesión Grupal', hint: 'Reservar Plaza (30 €)' };
         }
         if (item.classType === 'psicologia' || item.classType === 'nutricion' || item.classType === 'consulta') {
             if (item.complete === true || (Number.isFinite(item.freeSpots) && item.freeSpots <= 0)) {
@@ -971,30 +1014,39 @@
             return;
         }
 
-        // Mode 'clases'
-        const source = state.teacher
-            ? state.classes.filter(item => (
-                item.professor.slug === state.teacher
-                || String(item.professor.id || '') === state.teacher
-            ))
-            : state.classes;
-        const styles = [];
-        source.forEach(item => {
-            if (item.style && !styles.includes(item.style)) styles.push(item.style);
-        });
-        if (state.style && !styles.includes(state.style)) styles.unshift(state.style);
-
-        const buttons = [
+        // Mode 'clases' and global schedule
+        // Catálogo fijo y canónico de prácticas de yoga:
+        // Evita filtros dinámicos no deseados y excluye de forma definitiva "Yoga para Hombres"
+        const fixedYogaFilters = [
             { style: '', label: text('all') },
-            ...styles.map(style => ({ style, label: styleLabel(style, source) }))
+            { style: 'yoga-para-todos', label: text('everyone') },
+            { style: 'yoga-alineacion', label: text('alignment') },
+            { style: 'power-vinyasa', label: text('powerVinyasa') },
+            { style: 'restaurativa', label: text('restorative') },
+            { style: 'sesion-introductoria', label: text('introductory') },
+            { style: 'ayurveda', label: text('ayurveda') }
         ];
-        el.styleFilters.innerHTML = buttons.map(button => `
-            <button type="button" class="gy-calendar__filter"
-                data-calendar-style="${escapeHtml(button.style)}"
-                aria-pressed="${state.style === button.style}">
-                ${escapeHtml(button.label)}
-            </button>
-        `).join('');
+
+        el.styleFilters.innerHTML = fixedYogaFilters.map(button => {
+            let isPressed = false;
+            if (button.style === '') {
+                isPressed = !state.style;
+            } else if (button.style === 'power-vinyasa') {
+                isPressed = state.style === 'power-vinyasa' || state.style === 'vinyasa';
+            } else if (button.style === 'yoga-alineacion') {
+                isPressed = state.style === 'yoga-alineacion' || state.style === 'yoga-para-hombres';
+            } else {
+                isPressed = state.style === button.style;
+            }
+
+            return `
+                <button type="button" class="gy-calendar__filter"
+                    data-calendar-style="${escapeHtml(button.style)}"
+                    aria-pressed="${isPressed}">
+                    ${escapeHtml(button.label)}
+                </button>
+            `;
+        }).join('');
         const filterLabel = document.querySelector('.gy-calendar__filter-label');
         if (filterLabel) filterLabel.textContent = text('filterPractice');
         el.styleFilters.setAttribute('aria-label', text('filterPractice'));
@@ -1185,7 +1237,7 @@
         if (targetMode === 'talleres') {
             query = query.or('tipo_clase.eq.taller,tipo_clase.eq.especial,tipo_clase.eq.clase_especial,es_especial.eq.true');
         } else if (targetMode === 'clases') {
-            query = query.or('tipo_clase.eq.yoga,tipo_clase.eq.clase_especial,tipo_clase.eq.taller,tipo_clase.is.null,es_especial.eq.true,es_especial.eq.false,nombre.ilike.%introductor%,nombre.ilike.%abierta%,nombre.ilike.%bienvenida%');
+            query = query.or('tipo_clase.eq.yoga,tipo_clase.eq.clase_especial,tipo_clase.eq.taller,tipo_clase.is.null,es_especial.eq.true,es_especial.eq.false,nombre.ilike.%introductor%,nombre.ilike.%abierta%,nombre.ilike.%bienvenida%,es_gratuita.eq.true');
         }
 
         const { data, error } = await query;
@@ -1199,8 +1251,8 @@
         if (targetMode === 'talleres') {
             filtered = mapped.filter(item => item.classType === 'taller' || item.classType === 'especial' || item.classType === 'clase_especial' || item.isSpecial);
         } else if (targetMode === 'clases') {
-            // targetMode === 'clases': muestra clases de yoga regulares, clases especiales y talleres (excluye consultas)
-            filtered = mapped.filter(item => item.classType !== 'psicologia' && item.classType !== 'nutricion' && item.classType !== 'consulta');
+            // targetMode === 'clases': muestra clases de yoga regulares, clases especiales, talleres y sesiones introductorias (excluye consultas individuales regulares)
+            filtered = mapped.filter(item => (item.isFree || item.style === 'sesion-introductoria' || /introductor|bienvenida|abierta/i.test(item.name || '')) || (item.classType !== 'psicologia' && item.classType !== 'nutricion' && item.classType !== 'consulta' && item.classType !== 'consulta_grupal'));
         } else {
             filtered = mapped;
         }
@@ -1257,7 +1309,7 @@
                             return data
                                 .map(row => normalizeClassRow(row, true))
                                 .filter(Boolean)
-                                .filter(item => item.classType !== 'psicologia' && item.classType !== 'nutricion' && item.classType !== 'consulta');
+                                .filter(item => item.classType !== 'psicologia' && item.classType !== 'nutricion' && item.classType !== 'consulta' && item.classType !== 'consulta_grupal');
                         }
                     }
                     return await fetchDirectWeek(weekStart, 'clases');
@@ -1290,6 +1342,7 @@
                     .from('clases')
                     .select(DIRECT_SELECT)
                     .eq('activa', true)
+                    .eq('profesionales.visible_publico', true)
                     .gte('fecha_inicio', bounds.start)
                     .lt('fecha_inicio', bounds.end)
                     .order('fecha_inicio')
@@ -1310,7 +1363,7 @@
 
             // STRICT FILTER: Only consultation classes from DB (psychology / nutrition / consultations)
             const dbClases = rawWeekClasses.filter(c =>
-                (c.classType === 'psicologia' || c.classType === 'nutricion' || c.classType === 'consulta')
+                (c.classType === 'psicologia' || c.classType === 'nutricion' || c.classType === 'consulta' || c.classType === 'consulta_grupal')
                 && isCanonicalConsultationClass(c)
             );
 
@@ -1481,7 +1534,7 @@
                     classes: data
                         .map(row => normalizeClassRow(row, true))
                         .filter(Boolean)
-                        .filter(item => item.classType !== 'psicologia' && item.classType !== 'nutricion' && item.classType !== 'consulta')
+                        .filter(item => item.classType !== 'psicologia' && item.classType !== 'nutricion' && item.classType !== 'consulta' && item.classType !== 'consulta_grupal')
                 };
             }
 
@@ -1746,6 +1799,14 @@
         }
         if (Object.prototype.hasOwnProperty.call(options, 'style') || Object.prototype.hasOwnProperty.call(options, 'tipo') || Object.prototype.hasOwnProperty.call(options, 'type')) {
             state.style = canonicalStyle(options.style || options.tipo || options.type);
+            // Una tarjeta de estilo es siempre contexto yoga: no heredar modo/profe
+            // de una apertura anterior (p. ej. consultas de Miriam).
+            const hasMode = Object.prototype.hasOwnProperty.call(options, 'mode');
+            const hasTeacher = Object.prototype.hasOwnProperty.call(options, 'teacher') || Object.prototype.hasOwnProperty.call(options, 'profesional') || Object.prototype.hasOwnProperty.call(options, 'profesor');
+            if (!hasMode && !hasTeacher) {
+                state.mode = 'clases';
+                state.teacher = '';
+            }
         }
         if (Object.prototype.hasOwnProperty.call(options, 'classId')) {
             state.classId = safePositiveInteger(options.classId);
@@ -1802,6 +1863,14 @@
         }
         hidePanel();
         clearCalendarUrl();
+        // Cada apertura parte de estado limpio: la URL ya quedó limpia.
+        state.mode = 'clases';
+        state.teacher = '';
+        state.style = '';
+        state.classId = null;
+        state.oferta = '';
+        state.explicitWeek = false;
+        state.targetResolved = false;
         parseUrlState();
     }
 
@@ -1832,7 +1901,7 @@
             }
         }
 
-        if (item.classType === 'psicologia' || item.classType === 'nutricion' || item.classType === 'consulta') {
+        if (item.classType === 'psicologia' || item.classType === 'nutricion' || item.classType === 'consulta' || item.classType === 'consulta_grupal') {
             if (item.isVirtual) {
                 const params = new URLSearchParams({
                     view: item.classType === 'psicologia' ? 'psicologia' : (item.classType === 'nutricion' ? 'nutricion' : 'consultas'),
@@ -1915,7 +1984,7 @@
             state.classId = null;
             state.targetResolved = true;
             updateUrl('replace');
-            loadWeek();
+            render();
         });
         const modeToggle = document.getElementById('calendar-mode-toggle');
         if (modeToggle) {
@@ -1945,10 +2014,20 @@
             const button = event.target.closest('[data-calendar-style], [data-calendar-teacher]');
             if (!button) return;
             if (button.dataset.calendarTeacher !== undefined) {
-                state.teacher = normalizeTeacherParam(button.dataset.calendarTeacher);
+                const targetTeacher = normalizeTeacherParam(button.dataset.calendarTeacher);
+                state.teacher = state.teacher === targetTeacher ? '' : targetTeacher;
                 state.style = '';
             } else if (button.dataset.calendarStyle !== undefined) {
-                state.style = canonicalStyle(button.dataset.calendarStyle);
+                const targetStyle = button.dataset.calendarStyle;
+                if (!targetStyle) {
+                    state.style = '';
+                } else {
+                    const normTarget = canonicalStyle(targetStyle);
+                    const isAlreadyActive = state.style === normTarget
+                        || (normTarget === 'power-vinyasa' && state.style === 'vinyasa')
+                        || (normTarget === 'yoga-alineacion' && state.style === 'yoga-para-hombres');
+                    state.style = isAlreadyActive ? '' : normTarget;
+                }
             }
             state.classId = null;
             state.targetResolved = true;

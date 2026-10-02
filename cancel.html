@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="application-version" content="15.1">
+    <meta name="application-version" content="17.3">
     <meta name="theme-color" content="#f8f6f2">
     <meta name="robots" content="noindex,nofollow">
-    <link rel="icon" type="image/png" sizes="64x64" href="img/favicon-64.png?v=15.1">
-    <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png?v=15.1">
+    <link rel="icon" type="image/png" sizes="64x64" href="img/favicon-64.png?v=17.3">
+    <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png?v=17.3">
     <title>Reserva Cancelada - GEN Yoga</title>
     
     <!-- Sugerencias de rendimiento -->
@@ -46,9 +46,10 @@
             } catch (e) {}
         })();
     </script>
-    <link rel="stylesheet" href="tailwind-compiled.css?v=15.1">
+    <link rel="stylesheet" href="tailwind-compiled.css?v=17.3">
     <script src="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2" defer></script>
-    <script src="capacitor-bridge.js?v=15.1" defer></script>
+    <script src="i18n.js?v=17.3"></script>
+    <script src="capacitor-bridge.js?v=17.3" defer></script>
     
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Playfair+Display:ital,wght@0,700;1,400&display=swap');
@@ -62,6 +63,7 @@
     </style>
 </head>
 <body class="subpixel-antialiased min-h-screen w-full overflow-x-hidden relative flex items-center justify-center p-4 selection:bg-mutedgold selection:text-cocoa">
+  <div id="gy-cert-banner" aria-hidden="true" style="position:fixed;top:0;left:0;right:0;z-index:2147483647;background:rgba(38,22,12,.92);color:#f8f6f2;font:600 11px/22px system-ui,-apple-system,sans-serif;text-align:center;letter-spacing:.04em;pointer-events:none">ENTORNO DE PRUEBAS (cert) · misma base de datos que producción · compras desactivadas aquí</div>
     
     <!-- Background Gradient: Matches profile page -->
     <div class="fixed inset-0 z-0 bg-[linear-gradient(to_bottom,_#C3B89A_0%,_#AB593D_40%,_#8F6B2D_70%,_#6A6540_100%)]"></div>
@@ -75,10 +77,10 @@
         </div>
         
         <!-- Title -->
-        <h1 class="brand-font text-3xl font-black text-cocoa mb-3">Pago Cancelado</h1>
+        <h1 class="brand-font text-3xl font-black text-cocoa mb-3" data-i18n="cancel_page_title">Pago Cancelado</h1>
         
         <!-- Message -->
-        <p class="text-cocoa/75 text-sm mb-6 leading-relaxed">
+        <p class="text-cocoa/75 text-sm mb-6 leading-relaxed" data-i18n="cancel_page_message">
             Parece que el proceso de pago ha sido cancelado y no se ha realizado ningún cargo. No te preocupes, puedes volver a intentarlo cuando estés listo.
         </p>
 
@@ -90,18 +92,18 @@
 
         <!-- Buttons -->
         <div class="flex flex-col gap-3 w-full">
-            <a id="btn-primary" href="tarifas.html" class="w-full py-3.5 bg-cocoa hover:bg-black text-white text-center text-xs font-bold uppercase tracking-widest rounded-xl transition shadow-md hover:scale-[1.02] active:scale-[0.98]">
+            <a id="btn-primary" href="tarifas.html" data-i18n="cancel_btn_rates" class="w-full py-3.5 bg-cocoa hover:bg-black text-white text-center text-xs font-bold uppercase tracking-widest rounded-xl transition shadow-md hover:scale-[1.02] active:scale-[0.98]">
                 Volver a Tarifas
             </a>
-            <a id="btn-secondary" href="profile.html" class="w-full py-3.5 bg-gray-50 hover:bg-gray-100 text-cocoa/60 hover:text-cocoa text-center text-xs font-bold uppercase tracking-wider rounded-xl border border-cocoa/10 transition shadow-sm">
+            <a id="btn-secondary" href="profile.html" data-i18n="cancel_btn_profile_go" class="w-full py-3.5 bg-gray-50 hover:bg-gray-100 text-cocoa/60 hover:text-cocoa text-center text-xs font-bold uppercase tracking-wider rounded-xl border border-cocoa/10 transition shadow-sm">
                 Ir a mi Perfil
             </a>
         </div>
         
         <!-- Footer logo -->
         <div class="mt-8 opacity-60 flex flex-col items-center gap-1.5 text-xs text-cocoa">
-            <span class="brand-font italic text-sm font-bold text-cocoa">GEN Yoga - v15.1</span>
-            <a href="politica-privacidad.html" class="hover:underline transition text-[11px] text-cocoa/70">Política de privacidad</a>
+            <span class="brand-font italic text-sm font-bold text-cocoa">GEN Yoga - v17.3</span>
+            <a href="politica-privacidad.html" class="hover:underline transition text-[11px] text-cocoa/70" data-i18n="footer_privacy">Política de privacidad</a>
         </div>
     </div>
 
@@ -113,7 +115,17 @@
             try {
                 storedCheckoutOrigin = localStorage.getItem('stripe_checkout_origin') || '';
                 localStorage.removeItem('pending_booking_clase_id');
+                localStorage.removeItem('pending_consultation_booking');
+                localStorage.removeItem('pending_offer_redemption');
+                localStorage.removeItem('pending_intro_booking');
+                localStorage.removeItem('preferred_guest_class_id');
                 localStorage.removeItem('stripe_checkout_origin');
+                // Espejo de sessionStorage (tarifas escribe en ambos): limpiar también ahí.
+                ['guest_nombre', 'guest_apellidos', 'guest_email', 'preferred_guest_class_id',
+                 'stripe_checkout_origin', 'pending_booking_clase_id', 'pending_consultation_booking',
+                 'pending_offer_redemption', 'pending_intro_booking'].forEach(function (k) {
+                    try { sessionStorage.removeItem(k); } catch (_) {}
+                });
             } catch (error) {
                 console.warn('No se pudo limpiar el estado local del checkout:', error);
             }
@@ -123,15 +135,19 @@
             const btnSecondary = document.getElementById('btn-secondary');
             const redirectMessage = document.getElementById('redirect-message');
 
+            const tOk = (key, fallback) => (typeof window.t === 'function' ? (window.t(key) || fallback) : fallback);
+
             const setRedirectMessage = (destination) => {
                 if (!redirectMessage) return;
                 const countdown = document.createElement('span');
                 countdown.id = 'countdown-dynamic';
                 countdown.textContent = '5';
+                const prefix = tOk('cancel_redirect_to', 'Redirigiéndote a {dest} en ').replace('{dest}', destination);
+                const suffix = tOk('cancel_redirect_suffix', ' segundos...');
                 redirectMessage.replaceChildren(
-                    document.createTextNode(`Redirigiéndote a ${destination} en `),
+                    document.createTextNode(prefix),
                     countdown,
-                    document.createTextNode(' segundos...')
+                    document.createTextNode(suffix)
                 );
             };
             
@@ -141,23 +157,23 @@
                 redirectUrl = 'profile.html';
                 if (btnPrimary) {
                     btnPrimary.href = 'profile.html';
-                    btnPrimary.textContent = 'Volver a mi Perfil';
+                    btnPrimary.textContent = tOk('cancel_btn_profile', 'Volver a mi Perfil');
                 }
                 if (btnSecondary) {
                     btnSecondary.href = 'tarifas.html';
-                    btnSecondary.textContent = 'Ver Tarifas';
+                    btnSecondary.textContent = tOk('cancel_btn_rates', 'Volver a Tarifas');
                 }
-                setRedirectMessage('tu perfil');
+                setRedirectMessage(tOk('cancel_dest_profile', 'tu perfil'));
             } else {
                 if (btnPrimary) {
                     btnPrimary.href = 'tarifas.html';
-                    btnPrimary.textContent = 'Volver a Tarifas';
+                    btnPrimary.textContent = tOk('cancel_btn_rates', 'Volver a Tarifas');
                 }
                 if (btnSecondary) {
                     btnSecondary.href = 'profile.html';
-                    btnSecondary.textContent = 'Ir a mi Perfil';
+                    btnSecondary.textContent = tOk('cancel_btn_profile_go', 'Ir a mi Perfil');
                 }
-                setRedirectMessage('tarifas');
+                setRedirectMessage(tOk('cancel_dest_rates', 'tarifas'));
             }
 
             // Countdown timer redirect

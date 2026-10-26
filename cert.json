@@ -1,7 +1,7 @@
 {
   "entorno": "certificacion",
-  "version": "17.26.0",
+  "version": "17.27.0",
   "supabase": "jkjifmrrlyncuwpjhxvk.supabase.co",
-  "construido": "2026-10-26T10:28:04.638Z",
+  "construido": "2026-10-26T11:05:18.385Z",
   "aviso": "Entorno de pruebas. No usar con datos ni pagos reales."
 }

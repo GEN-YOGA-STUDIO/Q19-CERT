@@ -265,7 +265,7 @@
 
   // Interceptar llamadas a Edge Functions de Supabase en entornos nativos (iOS / Android)
   // para enrutarlas mediante CapacitorHttp. Evita errores de CORS / Origin en WKWebView
-  // (donde Origin es capacitor://localhost y el servidor exige https://genyoga.studio).
+  // (donde Origin es capacitor://localhost y el servidor exige https://gen-yoga-studio.github.io/GEN-YOGA-CERT).
   function hookNativeFunctionsFetch(native) {
     if (!native) return;
     try {
@@ -292,8 +292,8 @@
                   Object.assign(headers, init.headers);
                 }
               }
-              headers['Origin'] = 'https://genyoga.studio';
-              headers['Referer'] = 'https://genyoga.studio/profile.html';
+              headers['Origin'] = 'https://gen-yoga-studio.github.io/GEN-YOGA-CERT';
+              headers['Referer'] = 'https://gen-yoga-studio.github.io/GEN-YOGA-CERT/profile.html';
               if (!headers['Content-Type'] && !headers['content-type']) {
                 headers['Content-Type'] = 'application/json';
               }

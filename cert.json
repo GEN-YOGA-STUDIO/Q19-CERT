@@ -1,7 +1,8 @@
 {
   "entorno": "certificacion",
-  "version": "18.1.0",
+  "version": "18.2.0",
   "supabase": "jkjifmrrlyncuwpjhxvk.supabase.co",
-  "construido": "2026-10-29T12:12:55.499Z",
-  "aviso": "Entorno de pruebas. No usar con datos ni pagos reales."
+  "pagos": "desactivados",
+  "construido": "2026-10-31T10:57:02.115Z",
+  "aviso": "Entorno de pruebas. Pagos desactivados en el navegador y datos compartidos con producción."
 }

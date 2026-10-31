@@ -4,10 +4,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="application-version" content="18.1">
+    <meta name="application-version" content="18.2">
     <meta name="description" content="Política de privacidad y protección de datos de GEN Yoga.">
-    <link rel="icon" type="image/png" sizes="64x64" href="img/favicon-64.png?v=18.1">
-    <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png?v=18.1">
+    <link rel="icon" type="image/png" sizes="64x64" href="img/favicon-64.png?v=18.2">
+    <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png?v=18.2">
     <link rel="icon" href="favicon.ico" sizes="any" type="image/x-icon">
     <link rel="manifest" href="manifest.json">
     <title>Política de Privacidad | GEN Yoga</title>
@@ -20,9 +20,9 @@
     <meta property="og:url" content="https://gen-yoga-studio.github.io/GEN-YOGA-CERT/politica-privacidad.html" />
     <meta property="og:title" content="Política de Privacidad | GEN Yoga" />
     <meta property="og:description" content="Política de privacidad y protección de datos de GEN Yoga." />
-    <link rel="stylesheet" href="tailwind-compiled.css?v=18.1">
-    <script src="i18n.js?v=18.1"></script>
-    <script src="capacitor-bridge.js?v=18.1" defer></script>
+    <link rel="stylesheet" href="tailwind-compiled.css?v=18.2">
+    <script src="i18n.js?v=18.2"></script>
+    <script src="capacitor-bridge.js?v=18.2" defer></script>
 
     <style>
         /* Force Solid plain background (removes the shared dot pattern) */
@@ -32,12 +32,39 @@
         }
     </style>
   <meta name="robots" content="noindex,nofollow">
+    <script id="gy-cert-payment-guard">
+(function () {
+  window.__GY_CERT_PAYMENTS_DISABLED__ = true;
+  var originalFetch = window.fetch;
+  if (typeof originalFetch !== 'function') return;
+  window.fetch = function (input, init) {
+    var url = typeof input === 'string' ? input : ((input && input.url) || '');
+    if (url.indexOf('/functions/v1/create-checkout-session') !== -1) {
+      var message = 'Entorno de certificación: los pagos están desactivados. No se ha realizado ningún cargo.';
+      console.warn('[cert] Checkout bloqueado:', url);
+      if (window.Swal && typeof window.Swal.fire === 'function') {
+        window.Swal.fire({ icon: 'info', title: 'Pagos desactivados en certificación', text: message, confirmButtonColor: '#956857' });
+      } else {
+        window.alert(message);
+      }
+      return Promise.reject(new Error(message));
+    }
+    return originalFetch.apply(this, arguments);
+  };
+})();
+</script>
   </head>
 
 <body
     class="subpixel-antialiased min-h-screen w-full overflow-x-hidden relative selection:bg-mutedgold selection:text-cocoa font-sans bg-[#f8f6f2]">
-  <div id="gy-cert-banner" aria-hidden="true" style="position:fixed;top:0;left:0;right:0;z-index:2147483647;background:rgba(38,22,12,.92);color:#f8f6f2;font:600 11px/22px system-ui,-apple-system,sans-serif;text-align:center;letter-spacing:.04em;pointer-events:none">ENTORNO DE PRUEBAS (cert) · misma base de datos que producción · pagos habilitados para pruebas</div>
-    <a href="#main-content" style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;" onfocus="this.style.left='8px';this.style.top='8px';this.style.width='auto';this.style.height='auto';this.style.overflow='visible';" onblur="this.style.left='-9999px';this.style.top='auto';this.style.width='1px';this.style.height='1px';this.style.overflow='hidden';">Saltar al contenido principal</a>
+  <style id="gy-cert-banner-style">
+  #gy-cert-banner { position:fixed; top:0; left:0; right:0; z-index:9997; background:rgba(38,22,12,.96); color:#f8f6f2; font:600 12px/1.35 system-ui,-apple-system,sans-serif; text-align:center; letter-spacing:.03em; padding:5px 12px; pointer-events:none; }
+  body { padding-top:34px !important; }
+  @media (max-width:640px) { body { padding-top:48px !important; } }
+  html { scroll-padding-top:44px; }
+</style>
+<div id="gy-cert-banner" role="note">CERT · ENTORNO DE PRUEBAS · PAGOS DESACTIVADOS · MISMA BD QUE PRODUCCIÓN</div>
+    <a href="#main-content" style="position:absolute;left:-9999px;top:auto;width:44px;height:44px;overflow:hidden;" onfocus="this.style.left='8px';this.style.top='8px';this.style.width='auto';this.style.height='auto';this.style.overflow='visible';" onblur="this.style.left='-9999px';this.style.top='auto';this.style.width='1px';this.style.height='1px';this.style.overflow='hidden';">Saltar al contenido principal</a>
     <!-- Ambient Background Shapes -->
     <div id="parallax-bg"
         class="fixed inset-0 z-0 overflow-hidden pointer-events-none transition-transform duration-1000 ease-out">
@@ -272,7 +299,7 @@
         </div>
         </main>
         <footer class="w-full border-t border-[#795244]/15 py-6 px-6 text-center text-xs font-normal text-[#795244] mt-12">
-            <span id="app-version-label" class="opacity-90 text-[12px]">v18.1 | &copy; 2026 Gen Yoga</span>
+            <span id="app-version-label" class="opacity-90 text-[12px]">v18.2 | &copy; 2026 Gen Yoga</span>
         </footer>
     </div>
 

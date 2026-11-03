@@ -3,6 +3,6 @@
   "version": "18.3.1",
   "supabase": "jkjifmrrlyncuwpjhxvk.supabase.co",
   "pagos": "desactivados",
-  "construido": "2026-11-03T12:40:14.506Z",
+  "construido": "2026-11-03T13:26:37.804Z",
   "aviso": "Entorno de pruebas. Pagos desactivados en el navegador y datos compartidos con producción."
 }

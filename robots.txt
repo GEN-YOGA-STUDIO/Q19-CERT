@@ -1,2 +1,3 @@
 User-agent: *
 Disallow: /
+Sitemap: https://gen-yoga-studio.github.io/GEN-YOGA-CERT/sitemap.xml

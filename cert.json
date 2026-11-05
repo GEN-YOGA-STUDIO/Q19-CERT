@@ -3,6 +3,6 @@
   "version": "18.3.3",
   "supabase": "jkjifmrrlyncuwpjhxvk.supabase.co",
   "pagos": "simulacion-tarjeta-activa",
-  "construido": "2026-11-05T12:03:42.287Z",
+  "construido": "2026-11-05T12:17:54.927Z",
   "aviso": "Entorno de pruebas con pasarela de pagos simulada. Permite validar compras con tarjeta sin cargos reales ni conexión a Stripe."
 }

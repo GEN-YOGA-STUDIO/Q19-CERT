@@ -2285,34 +2285,72 @@
           if (prof.id === '00081fe2-88e6-4f12-ab49-b99713125dd0' || prof.email === 'profesor@profesor.com') {
             prof.rol = 'admin';
           }
+          // Enriquecer el perfil (sea el usuario actual o un alumno visto por el admin) con sus compras simuladas
+          var profPurchases = allPurchases.filter(function (p) {
+            return String(p.userId) === String(prof.id) || (p.userId === 'guest' && prof.id === currentUserId);
+          });
+          if (profPurchases.length === 0) return;
+
+          var activePacks = profPurchases.filter(function (p) {
+            return (p.purchaseType === 'pack_4' || p.purchaseType === 'pack_6' || p.purchaseType === 'pack_10' || p.purchaseType === 'clase_suelta')
+              && Date.parse(p.expiresAt) > Date.now();
+          });
+          var packCreds = activePacks.reduce(function (sum, p) { return sum + (p.creditsRemaining || 0); }, 0);
+          if (packCreds > 0) {
+            prof.bonos = (Number(prof.bonos) || 0) + packCreds;
+          }
+
+          var activeUnlimited = profPurchases.find(function (p) {
+            var now = Date.now();
+            return p.purchaseType === 'bono_ilimitado' && Date.parse(p.startsAt) <= now && Date.parse(p.endsAt) > now;
+          });
+          if (activeUnlimited) {
+            prof.bono_mensual_activo = true;
+            prof.bono_mensual_inicio = activeUnlimited.startsAt;
+            prof.bono_mensual_fin = activeUnlimited.endsAt;
+          }
+
+          // Consultas
+          var psicoCount = profPurchases.filter(function (p) { return p.purchaseType.indexOf('psico') !== -1; }).length;
+          if (psicoCount > 0) prof.saldo_psicologia = (Number(prof.saldo_psicologia) || 0) + psicoCount;
+
+          var nutriCount = profPurchases.reduce(function (sum, p) {
+            if (p.purchaseType.indexOf('ayurveda') !== -1 || p.purchaseType.indexOf('pni') !== -1) {
+              return sum + (p.purchaseType.indexOf('bono3') !== -1 ? 3 : (p.purchaseType.indexOf('bono6') !== -1 ? 6 : 1));
+            }
+            return sum;
+          }, 0);
+          if (nutriCount > 0) prof.saldo_nutricion = (Number(prof.saldo_nutricion) || 0) + nutriCount;
+
+          var grupoCount = profPurchases.filter(function (p) { return p.purchaseType.indexOf('grupo') !== -1; }).length;
+          if (grupoCount > 0) prof.saldo_grupal = (Number(prof.saldo_grupal) || 0) + grupoCount;
         });
+        return { data: isArr ? targetProfiles : targetProfiles[0], error: null };
       }
     }
 
-    var purchases = allPurchases.filter(function (p) {
-      return p.userId === currentUserId || (currentUserId !== 'guest' && p.userId === 'guest') || (p.userId && currentUserId && String(p.userId) === String(currentUserId));
-    });
-    if (purchases.length === 0) return result;
+    if (allPurchases.length === 0 && table !== 'reservas_yoga') return result;
 
     var data = result.data;
 
     // 1. Bono Mensual y Bono Inicial (monthly_membership_periods)
     if (table === 'monthly_membership_periods') {
-      var monthlyList = purchases.filter(function (p) {
+      var monthlyList = allPurchases.filter(function (p) {
         return p.purchaseType === 'bono_mensual' || p.purchaseType === 'bono_inicial';
       });
       if (monthlyList.length > 0) {
         var cList = Array.isArray(data) ? data.slice() : [];
         monthlyList.forEach(function (sim) {
+          var targetUid = sim.userId || currentUserId;
           var exists = cList.some(function (row) {
             return String(row.id) === String(sim.id) ||
                    (row.checkout_session_id && row.checkout_session_id === sim.sessionId) ||
-                   (row.plan_type === sim.planType && (row.membership_month === sim.membershipMonth + '-01' || (row.starts_at && sim.startsAt && Math.abs(Date.parse(row.starts_at) - Date.parse(sim.startsAt)) < 3600000)));
+                   (String(row.user_id) === String(targetUid) && row.plan_type === sim.planType && (row.membership_month === sim.membershipMonth + '-01' || (row.starts_at && sim.startsAt && Math.abs(Date.parse(row.starts_at) - Date.parse(sim.startsAt)) < 3600000)));
           });
           if (!exists) {
             cList.unshift({
               id: sim.id,
-              user_id: currentUserId,
+              user_id: targetUid,
               membership_month: sim.membershipMonth + '-01',
               starts_at: sim.startsAt,
               ends_at: sim.endsAt,
@@ -2329,21 +2367,22 @@
 
     // 2. Bono Ilimitado (unlimited_membership_periods)
     if (table === 'unlimited_membership_periods') {
-      var uList = purchases.filter(function (p) {
+      var uList = allPurchases.filter(function (p) {
         return p.purchaseType === 'bono_ilimitado';
       });
       if (uList.length > 0) {
         var curU = Array.isArray(data) ? data.slice() : [];
         uList.forEach(function (sim) {
+          var targetUid = sim.userId || currentUserId;
           var existsU = curU.some(function (row) {
             return String(row.id) === String(sim.id) ||
                    (row.checkout_session_id && row.checkout_session_id === sim.sessionId) ||
-                   (row.membership_month === sim.membershipMonth + '-01');
+                   (String(row.user_id) === String(targetUid) && row.membership_month === sim.membershipMonth + '-01');
           });
           if (!existsU) {
             curU.unshift({
               id: sim.id,
-              user_id: currentUserId,
+              user_id: targetUid,
               membership_month: sim.membershipMonth + '-01',
               starts_at: sim.startsAt,
               ends_at: sim.endsAt,
@@ -2358,19 +2397,20 @@
 
     // 3. Packs de clases (class_credit_packs)
     if (table === 'class_credit_packs') {
-      var packList = purchases.filter(function (p) {
+      var packList = allPurchases.filter(function (p) {
         return p.purchaseType === 'pack_4' || p.purchaseType === 'pack_6' || p.purchaseType === 'pack_10' || p.purchaseType === 'clase_suelta';
       });
       if (packList.length > 0) {
         var curP = Array.isArray(data) ? data.slice() : [];
         packList.forEach(function (sim) {
+          var targetUid = sim.userId || currentUserId;
           var existsP = curP.some(function (row) {
             return row.checkout_session_id === sim.sessionId || row.id === sim.id;
           });
           if (!existsP) {
             curP.unshift({
               id: sim.id,
-              user_id: currentUserId,
+              user_id: targetUid,
               checkout_session_id: sim.sessionId,
               pack_type: sim.purchaseType,
               credits_total: sim.creditsTotal,
@@ -2386,19 +2426,20 @@
 
     // 4. Clases especiales (bonos_clases_especiales)
     if (table === 'bonos_clases_especiales') {
-      var specialList = purchases.filter(function (p) {
+      var specialList = allPurchases.filter(function (p) {
         return p.purchaseType === 'bono_ilimitado' || p.purchaseType === 'clase_especial';
       });
       if (specialList.length > 0) {
         var curS = Array.isArray(data) ? data.slice() : [];
         specialList.forEach(function (sim) {
+          var targetUid = sim.userId || currentUserId;
           var existsS = curS.some(function (row) {
             return row.checkout_session_id === sim.sessionId || row.id === sim.id;
           });
           if (!existsS) {
             curS.push({
               id: sim.id,
-              user_id: currentUserId,
+              user_id: targetUid,
               mes: sim.membershipMonth + '-01',
               saldo: 1,
               origen: (sim.purchaseType === 'bono_ilimitado' ? 'bono_ilimitado' : 'compra_stripe'),
@@ -3085,7 +3126,7 @@
   html { scroll-padding-top:44px; }
 </style>
 <div id="gy-cert-banner" role="note">
-  <span>CERT · ENTORNO DE PRUEBAS · <strong style="background:#D27D60;color:#fff;padding:2px 8px;border-radius:12px;font-weight:800;letter-spacing:0.04em;margin:0 5px;box-shadow:0 1px 3px rgba(0,0,0,0.3);display:inline-block;">v18.5.1</strong> · SIMULACIÓN DE PAGOS ACTIVA (SIN CARGO REAL) · MISMA BD QUE PRODUCCIÓN</span>
+  <span>CERT · ENTORNO DE PRUEBAS · <strong style="background:#D27D60;color:#fff;padding:2px 8px;border-radius:12px;font-weight:800;letter-spacing:0.04em;margin:0 5px;box-shadow:0 1px 3px rgba(0,0,0,0.3);display:inline-block;">v18.5.2</strong> · SIMULACIÓN DE PAGOS ACTIVA (SIN CARGO REAL) · MISMA BD QUE PRODUCCIÓN</span>
   <button id="gy-cert-reset-btn" type="button" title="Restablecer bonos y compras simuladas en este navegador">🧹 Limpiar compras simuladas</button>
 </div>
     <a href="#auth-container" style="position:absolute;left:-9999px;top:auto;width:44px;height:44px;overflow:hidden;" onfocus="this.style.left='8px';this.style.top='8px';this.style.width='auto';this.style.height='auto';this.style.overflow='visible';" onblur="this.style.left='-9999px';this.style.top='auto';this.style.width='1px';this.style.height='1px';this.style.overflow='hidden';">Saltar al contenido principal</a>
@@ -5749,7 +5790,7 @@
                                 class="hover:underline hover:text-cocoa transition" data-i18n="profile_footer_legal">Aviso Legal</a> • <a
                                 href="politica-privacidad.html"
                                 class="hover:underline hover:text-cocoa transition" data-i18n="profile_footer_privacy">Política de Privacidad</a></span>
-                        <span id="app-version-label" class="opacity-90 text-[10px] block mt-1">v18.5.1 | &copy; 2026 Gen Yoga</span>
+                        <span id="app-version-label" class="opacity-90 text-[10px] block mt-1">v18.5.2 | &copy; 2026 Gen Yoga</span>
                     </div>
                 </div>
             </footer>
@@ -7762,14 +7803,20 @@
             }
 
             // v18.5: Periodos mensuales activos (Bono Mensual 2/sem y Bono Inicial 1/sem)
+            const currentMonthStart = (typeof madridDateKey === 'function' && madridDateKey(new Date()) ? madridDateKey(new Date()).slice(0, 7) : new Date().toISOString().slice(0, 7)) + '-01';
+            const ahoraMs = Date.now();
             let periodosMensualesAlumno = [];
             try {
                 const { data: mData } = await client.from('monthly_membership_periods')
                     .select('id, plan_type, membership_month, starts_at, ends_at, max_classes_per_week')
                     .eq('user_id', userId)
-                    .gte('ends_at', new Date().toISOString())
                     .order('membership_month', { ascending: true });
-                if (mData && mData.length > 0) periodosMensualesAlumno = mData;
+                if (mData && mData.length > 0) {
+                    periodosMensualesAlumno = mData.filter(p => {
+                        const endsMs = p.ends_at ? new Date(p.ends_at).getTime() : 0;
+                        return endsMs > ahoraMs || (p.membership_month && p.membership_month >= currentMonthStart);
+                    });
+                }
             } catch (e) {
                 console.warn('Error al cargar periodos mensuales para popup de bonos:', e);
             }
@@ -7780,9 +7827,13 @@
                 const { data: uData } = await client.from('unlimited_membership_periods')
                     .select('id, membership_month, starts_at, ends_at')
                     .eq('user_id', userId)
-                    .gte('ends_at', new Date().toISOString())
                     .order('membership_month', { ascending: true });
-                if (uData && uData.length > 0) periodosIlimitadosAlumno = uData;
+                if (uData && uData.length > 0) {
+                    periodosIlimitadosAlumno = uData.filter(p => {
+                        const endsMs = p.ends_at ? new Date(p.ends_at).getTime() : 0;
+                        return endsMs > ahoraMs || (p.membership_month && p.membership_month >= currentMonthStart);
+                    });
+                }
             } catch (e) {
                 console.warn('Error al cargar periodos ilimitados para popup de bonos:', e);
             }
@@ -7807,31 +7858,47 @@
             if (periodosIlimitadosAlumno.length > 0) {
                 const nombres = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
                 periodosIlimitadosAlumno.forEach(p => {
-                    const d = new Date(p.starts_at || (p.membership_month + '-01'));
-                    const mesLabel = isNaN(d.getTime()) ? '' : ` (${nombres[d.getMonth()]} ${String(d.getFullYear()).slice(-2)})`;
+                    let mesLabel = '';
+                    if (p.starts_at && p.ends_at) {
+                        const dIni = new Date(p.starts_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+                        const dFin = new Date(p.ends_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+                        mesLabel = ` (${dIni} – ${dFin})`;
+                    } else {
+                        const d = new Date(p.starts_at || (p.membership_month + '-01'));
+                        mesLabel = isNaN(d.getTime()) ? '' : ` (${nombres[d.getMonth()]} ${String(d.getFullYear()).slice(-2)})`;
+                    }
                     rows.push(`<div class="flex items-center justify-between py-2 border-b border-gray-100">
-                        <span class="flex items-center gap-2 text-sm"><i class="ph-bold ph-infinity text-purple-600"></i> Bono Ilimitado</span>
-                        <span class="text-sm font-bold text-purple-700">Activo${mesLabel}</span>
+                        <span class="flex items-center gap-2 text-sm"><i class="ph-bold ph-infinity text-emerald-600"></i> Bono Ilimitado (90 €)</span>
+                        <span class="text-sm font-bold text-emerald-700">Activo${mesLabel}</span>
                     </div>`);
                 });
             } else if (ilimitadoLegacy) {
                 rows.push(`<div class="flex items-center justify-between py-2 border-b border-gray-100">
-                    <span class="flex items-center gap-2 text-sm"><i class="ph-bold ph-infinity text-purple-600"></i> Bono Ilimitado</span>
-                    <span class="text-sm font-bold text-purple-700">Activo${mesStr}</span>
+                    <span class="flex items-center gap-2 text-sm"><i class="ph-bold ph-infinity text-emerald-600"></i> Bono Ilimitado (90 €)</span>
+                    <span class="text-sm font-bold text-emerald-700">Activo${mesStr}</span>
                 </div>`);
             }
 
             if (periodosMensualesAlumno.length > 0) {
                 const nombres = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
                 periodosMensualesAlumno.forEach(p => {
-                    const d = new Date(p.starts_at || (p.membership_month + '-01'));
-                    const mesLabel = isNaN(d.getTime()) ? '' : ` (${nombres[d.getMonth()]} ${String(d.getFullYear()).slice(-2)})`;
-                    const planNombre = p.plan_type === 'bono_inicial' || toSafeNumber(p.max_classes_per_week) === 1
-                        ? 'Bono Inicial (4 clases/mes)'
-                        : 'Bono Mensual (8 clases/mes)';
+                    let mesLabel = '';
+                    if (p.starts_at && p.ends_at) {
+                        const dIni = new Date(p.starts_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+                        const dFin = new Date(p.ends_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+                        mesLabel = ` (${dIni} – ${dFin})`;
+                    } else {
+                        const d = new Date(p.starts_at || (p.membership_month + '-01'));
+                        mesLabel = isNaN(d.getTime()) ? '' : ` (${nombres[d.getMonth()]} ${String(d.getFullYear()).slice(-2)})`;
+                    }
+                    const esIni = p.plan_type === 'bono_inicial' || toSafeNumber(p.max_classes_per_week) === 1;
+                    const planNombre = esIni
+                        ? 'Bono Inicial (40 € · 4 cl/30d)'
+                        : 'Bono Mensual (65 € · 8 cl/30d)';
+                    const colorClase = esIni ? 'text-[#8f6b2d]' : 'text-amber-700';
                     rows.push(`<div class="flex items-center justify-between py-2 border-b border-gray-100">
-                        <span class="flex items-center gap-2 text-sm"><i class="ph-bold ph-calendar-check text-purple-600"></i> ${planNombre}</span>
-                        <span class="text-sm font-bold text-purple-700">Activo${mesLabel}</span>
+                        <span class="flex items-center gap-2 text-sm"><i class="ph-bold ph-${esIni ? 'plant' : 'calendar-check'} ${colorClase}"></i> ${planNombre}</span>
+                        <span class="text-sm font-bold ${colorClase}">Activo${mesLabel}</span>
                     </div>`);
                 });
             }
@@ -7905,9 +7972,11 @@
         function getTextoBusquedaPerfil(profile) {
             const bonosTextos = [];
             const tieneIlimitado = typeof tieneUsuarioBonoIlimitado === 'function' ? tieneUsuarioBonoIlimitado(profile) : false;
-            const tieneMensual = (typeof tieneUsuarioBonoMensual === 'function' && tieneUsuarioBonoMensual(profile)) || (typeof tieneUsuarioBonoInicial === 'function' && tieneUsuarioBonoInicial(profile));
-            if (tieneIlimitado) bonosTextos.push('ilimitado vip mensual bono ilimitado');
-            if (tieneMensual) bonosTextos.push('mensual bono mensual inicial bono inicial');
+            const tieneMensual = typeof tieneUsuarioBonoMensual === 'function' && tieneUsuarioBonoMensual(profile);
+            const tieneInicial = typeof tieneUsuarioBonoInicial === 'function' && tieneUsuarioBonoInicial(profile);
+            if (tieneIlimitado) bonosTextos.push('ilimitado vip bono ilimitado');
+            if (tieneMensual) bonosTextos.push('mensual bono mensual');
+            if (tieneInicial) bonosTextos.push('inicial bono inicial');
             if (profile?.special_passes && profile.special_passes.some(s => toSafeNumber(s.saldo) > 0)) bonosTextos.push('especial especiales clase especial');
             if (toSafeNumber(profile?.bonos) > 0) bonosTextos.push('bono bonos suelto suelta clase suelta');
             if (toSafeNumber(profile?.saldo_clases_gratis) > 0) bonosTextos.push('bienvenida gratis');
@@ -18949,13 +19018,15 @@
                 ? madridDateKey(new Date()).slice(0, 7)
                 : new Date().toISOString().slice(0, 7);
 
+            const ahoraMs = Date.now();
             users.forEach(u => {
                 const rawUnlimited = periodsByUser.get(u.id) || [];
                 u.unlimited_periods = rawUnlimited.filter(p => {
                     const mKey = typeof normalizarMesClave === 'function'
                         ? normalizarMesClave(p.membership_month || p.starts_at)
                         : String(p.membership_month || p.starts_at || '').slice(0, 7);
-                    return mKey && mKey >= currentMonthKey;
+                    const endsMs = p.ends_at ? new Date(p.ends_at).getTime() : 0;
+                    return (endsMs > ahoraMs) || (mKey && mKey >= currentMonthKey);
                 });
 
                 const rawMonthly = monthlyByUser.get(u.id) || [];
@@ -18963,7 +19034,8 @@
                     const mKey = typeof normalizarMesClave === 'function'
                         ? normalizarMesClave(m.membership_month || m.starts_at)
                         : String(m.membership_month || m.starts_at || '').slice(0, 7);
-                    return mKey && mKey >= currentMonthKey;
+                    const endsMs = m.ends_at ? new Date(m.ends_at).getTime() : 0;
+                    return (endsMs > ahoraMs) || (mKey && mKey >= currentMonthKey);
                 });
 
                 const rawSpecials = specialsByUser.get(u.id) || [];
@@ -19411,10 +19483,13 @@
             const currentMonthKey = (typeof normalizarMesClave === 'function' && typeof madridDateKey === 'function' && madridDateKey(new Date()))
                 ? madridDateKey(new Date()).slice(0, 7)
                 : new Date().toISOString().slice(0, 7);
+            const ahoraMs = Date.now();
 
-            // 1. Revisar si tiene contratado el mes natural actual o futuro en unlimited_periods
+            // 1. Revisar si tiene contratado el mes natural actual o periodo vigente en unlimited_periods
             if (Array.isArray(u.unlimited_periods) && u.unlimited_periods.length > 0) {
                 return u.unlimited_periods.some(p => {
+                    const endsMs = p.ends_at ? new Date(p.ends_at).getTime() : 0;
+                    if (endsMs > ahoraMs) return true;
                     const mKey = typeof normalizarMesClave === 'function'
                         ? normalizarMesClave(p.membership_month || p.starts_at)
                         : String(p.membership_month || p.starts_at || '').slice(0, 7);
@@ -19432,21 +19507,15 @@
                     const mKeyInicio = typeof normalizarMesClave === 'function'
                         ? normalizarMesClave(u.bono_mensual_inicio)
                         : String(u.bono_mensual_inicio).slice(0, 7);
-                    if (mKeyInicio && mKeyInicio < currentMonthKey) {
-                        return false; // Pertenece a un mes pasado
+                    if (mKeyInicio && mKeyInicio < currentMonthKey && (!u.bono_mensual_fin || new Date(u.bono_mensual_fin) < now)) {
+                        return false;
                     }
-                }
-                if (!u.bono_mensual_fin && !u.bono_mensual_inicio) {
-                    return false;
                 }
                 return true;
             }
 
             if (u.bono_mensual_fin && new Date(u.bono_mensual_fin) >= new Date()) {
-                const mKeyFin = typeof normalizarMesClave === 'function'
-                    ? normalizarMesClave(u.bono_mensual_fin)
-                    : String(u.bono_mensual_fin).slice(0, 7);
-                return mKeyFin >= currentMonthKey;
+                return true;
             }
 
             return false;
@@ -19458,14 +19527,18 @@
             const currentMonthKey = (typeof normalizarMesClave === 'function' && typeof madridDateKey === 'function' && madridDateKey(new Date()))
                 ? madridDateKey(new Date()).slice(0, 7)
                 : new Date().toISOString().slice(0, 7);
+            const ahoraMs = Date.now();
 
             if (Array.isArray(u.monthly_periods) && u.monthly_periods.length > 0) {
                 return u.monthly_periods.some(p => {
+                    const isInicial = p.plan_type === 'bono_inicial' || toSafeNumber(p.max_classes_per_week) === 1;
+                    if (!isInicial) return false;
+                    const endsMs = p.ends_at ? new Date(p.ends_at).getTime() : 0;
+                    if (endsMs > ahoraMs) return true;
                     const mKey = typeof normalizarMesClave === 'function'
                         ? normalizarMesClave(p.membership_month || p.starts_at)
                         : String(p.membership_month || p.starts_at || '').slice(0, 7);
-                    const isInicial = p.plan_type === 'bono_inicial' || toSafeNumber(p.max_classes_per_week) === 1;
-                    return mKey && mKey >= currentMonthKey && isInicial;
+                    return mKey && mKey >= currentMonthKey;
                 });
             }
             return false;
@@ -19477,14 +19550,18 @@
             const currentMonthKey = (typeof normalizarMesClave === 'function' && typeof madridDateKey === 'function' && madridDateKey(new Date()))
                 ? madridDateKey(new Date()).slice(0, 7)
                 : new Date().toISOString().slice(0, 7);
+            const ahoraMs = Date.now();
 
             if (Array.isArray(u.monthly_periods) && u.monthly_periods.length > 0) {
                 return u.monthly_periods.some(p => {
+                    const isInicial = p.plan_type === 'bono_inicial' || toSafeNumber(p.max_classes_per_week) === 1;
+                    if (isInicial) return false;
+                    const endsMs = p.ends_at ? new Date(p.ends_at).getTime() : 0;
+                    if (endsMs > ahoraMs) return true;
                     const mKey = typeof normalizarMesClave === 'function'
                         ? normalizarMesClave(p.membership_month || p.starts_at)
                         : String(p.membership_month || p.starts_at || '').slice(0, 7);
-                    const isInicial = p.plan_type === 'bono_inicial' || toSafeNumber(p.max_classes_per_week) === 1;
-                    return mKey && mKey >= currentMonthKey && !isInicial;
+                    return mKey && mKey >= currentMonthKey;
                 });
             }
             return false;
@@ -19499,20 +19576,32 @@
             const consultas = toSafeNumber(u.saldo_consultas_gratis);
             const nombresMeses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
             const currentMonthKey = (typeof madridDateKey === 'function' && madridDateKey(new Date()) ? madridDateKey(new Date()).slice(0, 7) : new Date().toISOString().slice(0, 7));
+            const ahoraMs = Date.now();
 
             // 1. Bonos Mensuales e Ilimitados contratados (activos y futuros, con clic directo a gestión)
             const mesesIlimitadosVistos = new Set();
             (u.unlimited_periods || []).forEach(p => {
+                const endsMs = p.ends_at ? new Date(p.ends_at).getTime() : 0;
                 const mKey = typeof normalizarMesClave === 'function' ? normalizarMesClave(p.membership_month || p.starts_at) : String(p.membership_month || p.starts_at || '').slice(0, 7);
-                if (!mKey || mKey < currentMonthKey || mesesIlimitadosVistos.has(mKey)) return;
-                mesesIlimitadosVistos.add(mKey);
-                const [yyyy, mm] = mKey.split('-');
-                const mesLabel = mm ? `${nombresMeses[parseInt(mm, 10) - 1]} ${String(yyyy).slice(-2)}` : mKey;
-                const esActual = mKey === currentMonthKey;
+                const sigueVigente = endsMs > ahoraMs;
+                if (!sigueVigente && (!mKey || mKey < currentMonthKey)) return;
+                const dedupeKey = p.id ? String(p.id) : (mKey || 'ilim');
+                if (mesesIlimitadosVistos.has(dedupeKey)) return;
+                mesesIlimitadosVistos.add(dedupeKey);
+
+                const [yyyy, mm] = (mKey || '').split('-');
+                let mesLabel = mm ? `${nombresMeses[parseInt(mm, 10) - 1]} ${String(yyyy).slice(-2)}` : (mKey || '30d');
+                let fechaRango = mesLabel;
+                if (p.starts_at && p.ends_at) {
+                    const dIni = new Date(p.starts_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+                    const dFin = new Date(p.ends_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+                    fechaRango = `${dIni} – ${dFin}`;
+                }
+                const esActual = sigueVigente || mKey === currentMonthKey;
                 badges.push(`
                     <button type="button" onclick="abrirGestionBonosUsuario('${escapeHtml(String(u.id))}')" 
                         class="bg-emerald-100 hover:bg-emerald-200 text-emerald-950 text-[10px] font-black px-2 py-0.5 rounded-md border border-emerald-300 flex items-center gap-1 shadow-2xs transition cursor-pointer" 
-                        title="${esActual ? 'Mes Ilimitado activo este mes' : 'Mes Ilimitado próximo mes'} (Clic para gestionar)">
+                        title="${esActual ? 'Mes Ilimitado activo' : 'Mes Ilimitado próximo'} (${fechaRango}) (Clic para gestionar)">
                         <i class="ph-bold ph-infinity text-emerald-700"></i> Ilimitado (${mesLabel})
                     </button>
                 `);
@@ -19534,22 +19623,30 @@
             // Monthly periods (Inicial y Mensual)
             const mesesMonthlyVistos = new Set();
             (u.monthly_periods || []).forEach(p => {
+                const endsMs = p.ends_at ? new Date(p.ends_at).getTime() : 0;
                 const mKey = typeof normalizarMesClave === 'function' ? normalizarMesClave(p.membership_month || p.starts_at) : String(p.membership_month || p.starts_at || '').slice(0, 7);
-                if (!mKey || mKey < currentMonthKey) return;
+                const sigueVigente = endsMs > ahoraMs;
+                if (!sigueVigente && (!mKey || mKey < currentMonthKey)) return;
                 const esInicial = p.plan_type === 'bono_inicial' || toSafeNumber(p.max_classes_per_week) === 1;
-                const dedupeKey = `${mKey}_${esInicial ? 'ini' : 'men'}`;
+                const dedupeKey = p.id ? String(p.id) : `${mKey}_${esInicial ? 'ini' : 'men'}`;
                 if (mesesMonthlyVistos.has(dedupeKey)) return;
                 mesesMonthlyVistos.add(dedupeKey);
 
-                const [yyyy, mm] = mKey.split('-');
-                const mesLabel = mm ? `${nombresMeses[parseInt(mm, 10) - 1]} ${String(yyyy).slice(-2)}` : mKey;
-                const esActual = mKey === currentMonthKey;
+                const [yyyy, mm] = (mKey || '').split('-');
+                let mesLabel = mm ? `${nombresMeses[parseInt(mm, 10) - 1]} ${String(yyyy).slice(-2)}` : (mKey || '30d');
+                let fechaRango = mesLabel;
+                if (p.starts_at && p.ends_at) {
+                    const dIni = new Date(p.starts_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+                    const dFin = new Date(p.ends_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+                    fechaRango = `${dIni} – ${dFin}`;
+                }
+                const esActual = sigueVigente || mKey === currentMonthKey;
 
                 if (esInicial) {
                     badges.push(`
                         <button type="button" onclick="abrirGestionBonosUsuario('${escapeHtml(String(u.id))}')" 
                             class="bg-[#faf6f0] hover:bg-[#f3ebd9] text-[#715019] text-[10px] font-black px-2 py-0.5 rounded-md border border-[#e6d7c3] flex items-center gap-1 shadow-2xs transition cursor-pointer" 
-                            title="${esActual ? 'Bono Inicial (4 cl/mes) activo este mes' : 'Bono Inicial (4 cl/mes) próximo mes'} (Clic para gestionar)">
+                            title="${esActual ? 'Bono Inicial (4 cl/30d) activo' : 'Bono Inicial (4 cl/30d) próximo'} (${fechaRango}) (Clic para gestionar)">
                             <i class="ph-bold ph-plant text-[#8f6b2d]"></i> Inicial (${mesLabel})
                         </button>
                     `);
@@ -19557,7 +19654,7 @@
                     badges.push(`
                         <button type="button" onclick="abrirGestionBonosUsuario('${escapeHtml(String(u.id))}')" 
                             class="bg-amber-100 hover:bg-amber-200 text-amber-950 text-[10px] font-black px-2 py-0.5 rounded-md border border-amber-300 flex items-center gap-1 shadow-2xs transition cursor-pointer" 
-                            title="${esActual ? 'Bono Mensual (8 cl/mes) activo este mes' : 'Bono Mensual (8 cl/mes) próximo mes'} (Clic para gestionar)">
+                            title="${esActual ? 'Bono Mensual (8 cl/30d) activo' : 'Bono Mensual (8 cl/30d) próximo'} (${fechaRango}) (Clic para gestionar)">
                             <i class="ph-bold ph-calendar-check text-amber-700"></i> Mensual (${mesLabel})
                         </button>
                     `);
@@ -25010,10 +25107,14 @@
                 const { data: pData } = await client.from('unlimited_membership_periods')
                     .select('id, membership_month, starts_at, ends_at')
                     .eq('user_id', userId)
-                    .or(`ends_at.gt.${nowIso},membership_month.gte.${currentMonthStart}`)
                     .order('starts_at', { ascending: true });
                 if (pData && pData.length > 0) {
-                    userMonths = pData;
+                    const ahora = Date.now();
+                    userMonths = pData.filter(p => {
+                        const endsMs = p.ends_at ? new Date(p.ends_at).getTime() : 0;
+                        const mKey = typeof normalizarMesClave === 'function' ? normalizarMesClave(p.membership_month || p.starts_at) : String(p.membership_month || p.starts_at || '').slice(0, 7);
+                        return endsMs > ahora || (mKey && mKey >= currentMonthKey);
+                    });
                 }
             } catch (err) {
                 console.warn('Error leyendo unlimited_membership_periods:', err);
@@ -25025,10 +25126,14 @@
                 const { data: mData } = await client.from('monthly_membership_periods')
                     .select('id, membership_month, starts_at, ends_at, max_classes_per_week, plan_type')
                     .eq('user_id', userId)
-                    .or(`ends_at.gt.${nowIso},membership_month.gte.${currentMonthStart}`)
                     .order('starts_at', { ascending: true });
                 if (mData && mData.length > 0) {
-                    userMonthlyPeriods = mData;
+                    const ahora = Date.now();
+                    userMonthlyPeriods = mData.filter(m => {
+                        const endsMs = m.ends_at ? new Date(m.ends_at).getTime() : 0;
+                        const mKey = typeof normalizarMesClave === 'function' ? normalizarMesClave(m.membership_month || m.starts_at) : String(m.membership_month || m.starts_at || '').slice(0, 7);
+                        return endsMs > ahora || (mKey && mKey >= currentMonthKey);
+                    });
                 }
             } catch (err) {
                 console.warn('Error leyendo monthly_membership_periods:', err);
@@ -30015,14 +30120,11 @@
                     const tieneMensual = typeof tieneUsuarioBonoMensual === 'function' && tieneUsuarioBonoMensual(cliente);
                     const tieneInicial = typeof tieneUsuarioBonoInicial === 'function' && tieneUsuarioBonoInicial(cliente);
                     const tieneIlimitado = typeof tieneUsuarioBonoIlimitado === 'function' ? tieneUsuarioBonoIlimitado(cliente) : Boolean(cliente?.bono_mensual_activo);
-                    let mensual = 'Mensual inactivo';
-                    if (tieneIlimitado) {
-                        mensual = 'Ilimitado activo';
-                    } else if (tieneMensual) {
-                        mensual = 'Bono Mensual activo';
-                    } else if (tieneInicial) {
-                        mensual = 'Bono Inicial activo';
-                    }
+                    const activeBonos = [];
+                    if (tieneIlimitado) activeBonos.push('Ilimitado');
+                    if (tieneMensual) activeBonos.push('Bono Mensual');
+                    if (tieneInicial) activeBonos.push('Bono Inicial');
+                    const mensual = activeBonos.length > 0 ? activeBonos.join(' + ') + ' activo' : 'Mensual inactivo';
                     const selectionText = `${label} · ${identifier}`;
                     return {
                         id,

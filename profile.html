@@ -2284,10 +2284,58 @@
           return res;
         });
       } else if (type === 'bono_ilimitado') {
-        return fetch(rpcUrl + 'admin_asignar_mes_ilimitado', {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify({ p_user_id: targetUid, p_membership_month: mMonth, p_activo: true })
+        // Purgar registros conflictivos en Supabase para este mes
+        return fetch('https://jkjifmrrlyncuwpjhxvk.supabase.co/rest/v1/unlimited_membership_periods?user_id=eq.' + targetUid + '&membership_month=eq.' + mMonth, {
+          method: 'DELETE',
+          headers: headers
+        })
+        .then(function () {
+          // Insertar registro con el rango exacto de 30 días
+          return fetch('https://jkjifmrrlyncuwpjhxvk.supabase.co/rest/v1/unlimited_membership_periods', {
+            method: 'POST',
+            headers: Object.assign({}, headers, { 'Prefer': 'return=representation' }),
+            body: JSON.stringify({
+              user_id: targetUid,
+              membership_month: mMonth,
+              starts_at: startIso,
+              ends_at: endIso,
+              purchased_at: new Date().toISOString()
+            })
+          });
+        })
+        .then(function () {
+          return fetch('https://jkjifmrrlyncuwpjhxvk.supabase.co/rest/v1/profiles?id=eq.' + targetUid, {
+            method: 'PATCH',
+            headers: headers,
+            body: JSON.stringify({
+              bono_mensual_activo: true,
+              bono_mensual_inicio: startIso,
+              bono_mensual_fin: endIso
+            })
+          });
+        })
+        .then(function () {
+          return fetch('https://jkjifmrrlyncuwpjhxvk.supabase.co/rest/v1/bonos_clases_especiales', {
+            method: 'POST',
+            headers: Object.assign({}, headers, { 'Prefer': 'resolution=merge-duplicates' }),
+            body: JSON.stringify({
+              user_id: targetUid,
+              mes: mMonth,
+              saldo: 1,
+              origen: 'bono_ilimitado'
+            })
+          });
+        })
+        .then(function (res) {
+          if (!res.ok) {
+            console.warn('[cert-simulator] Fallback a RPC admin_asignar_mes_ilimitado por HTTP ' + res.status);
+            return fetch(rpcUrl + 'admin_asignar_mes_ilimitado', {
+              method: 'POST',
+              headers: headers,
+              body: JSON.stringify({ p_user_id: targetUid, p_membership_month: mMonth, p_activo: true })
+            });
+          }
+          return res;
         });
       } else if (type === 'pack_4' || type === 'pack_6' || type === 'pack_10' || type === 'clase_suelta') {
         var cr = type === 'pack_4' ? 4 : (type === 'pack_6' ? 6 : (type === 'pack_10' ? 10 : 1));
@@ -3336,7 +3384,7 @@
   html { scroll-padding-top:44px; }
 </style>
 <div id="gy-cert-banner" role="note">
-  <span>CERT · ENTORNO DE PRUEBAS · <strong style="background:#D27D60;color:#fff;padding:2px 8px;border-radius:12px;font-weight:800;letter-spacing:0.04em;margin:0 5px;box-shadow:0 1px 3px rgba(0,0,0,0.3);display:inline-block;">v18.5.8</strong> · SIMULACIÓN DE PAGOS ACTIVA (SIN CARGO REAL) · MISMA BD QUE PRODUCCIÓN</span>
+  <span>CERT · ENTORNO DE PRUEBAS · <strong style="background:#D27D60;color:#fff;padding:2px 8px;border-radius:12px;font-weight:800;letter-spacing:0.04em;margin:0 5px;box-shadow:0 1px 3px rgba(0,0,0,0.3);display:inline-block;">v18.5.9</strong> · SIMULACIÓN DE PAGOS ACTIVA (SIN CARGO REAL) · MISMA BD QUE PRODUCCIÓN</span>
   <button id="gy-cert-reset-btn" type="button" title="Restablecer bonos y compras simuladas en este navegador">🧹 Limpiar compras simuladas</button>
 </div>
     <a href="#auth-container" style="position:absolute;left:-9999px;top:auto;width:44px;height:44px;overflow:hidden;" onfocus="this.style.left='8px';this.style.top='8px';this.style.width='auto';this.style.height='auto';this.style.overflow='visible';" onblur="this.style.left='-9999px';this.style.top='auto';this.style.width='1px';this.style.height='1px';this.style.overflow='hidden';">Saltar al contenido principal</a>
@@ -6000,7 +6048,7 @@
                                 class="hover:underline hover:text-cocoa transition" data-i18n="profile_footer_legal">Aviso Legal</a> • <a
                                 href="politica-privacidad.html"
                                 class="hover:underline hover:text-cocoa transition" data-i18n="profile_footer_privacy">Política de Privacidad</a></span>
-                        <span id="app-version-label" class="opacity-90 text-[10px] block mt-1">v18.5.8 | &copy; 2026 Gen Yoga</span>
+                        <span id="app-version-label" class="opacity-90 text-[10px] block mt-1">v18.5.9 | &copy; 2026 Gen Yoga</span>
                     </div>
                 </div>
             </footer>
@@ -10134,6 +10182,37 @@
                     if (!aIsReal && bIsReal) return 1;
                     return 0;
                 });
+                // Auto-healing: garantizar que los periodos ilimitados cubren exactamente 30 días naturales desde su compra o activación
+                rawUnlimited.forEach(p => {
+                    if (p.starts_at && p.ends_at) {
+                        const sD = new Date(p.starts_at);
+                        const eD = new Date(p.ends_at);
+                        const isDay1 = sD.getUTCDate() === 1 && eD.getUTCDate() === 1;
+                        const pAt = p.purchased_at ? new Date(p.purchased_at).getTime() : 0;
+                        if (isDay1) {
+                            const baseTime = (pAt && (pAt - sD.getTime() > 24 * 60 * 60 * 1000))
+                                ? pAt
+                                : ((sD.getTime() < Date.now() - 24 * 60 * 60 * 1000 && eD.getTime() > Date.now()) ? (pAt || Date.now()) : 0);
+                            if (baseTime > 0) {
+                                const newStart = new Date(baseTime);
+                                const newEnd = new Date(baseTime + 30 * 24 * 60 * 60 * 1000);
+                                p.starts_at = newStart.toISOString();
+                                p.ends_at = newEnd.toISOString();
+                                if (p.id && !String(p.id).startsWith('cert_')) {
+                                    client.from('unlimited_membership_periods')
+                                        .update({ starts_at: p.starts_at, ends_at: p.ends_at })
+                                        .eq('id', p.id)
+                                        .then(() => {})
+                                        .catch(() => {});
+                                }
+                                if (currentUserProfile) {
+                                    currentUserProfile.bono_mensual_inicio = p.starts_at;
+                                    currentUserProfile.bono_mensual_fin = p.ends_at;
+                                }
+                            }
+                        }
+                    }
+                });
                 const seenU = new Set();
                 userUnlimitedPeriods = rawUnlimited.filter(p => {
                     const ym = (typeof normalizarMesClave === 'function')
@@ -11260,6 +11339,8 @@
                 (!currentUserProfile?.bono_mensual_inicio || String(currentUserProfile.bono_mensual_inicio).slice(0, 7) >= ymActual);
 
             if (allUserPeriods.length === 0 && isLegacyUnlimitedValid) {
+                const sLegacy = currentUserProfile.bono_mensual_inicio || new Date().toISOString();
+                const eLegacy = currentUserProfile.bono_mensual_fin || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
                 allUserPeriods.push({
                     id: '',
                     tipo: 'bono_ilimitado',
@@ -11268,8 +11349,8 @@
                     badgeStyle: 'background-color:#b45309;color:#ffffff;',
                     maxClasses: Infinity,
                     mesKey: ymActual,
-                    starts_at: `${ymActual}-01T00:00:00.000Z`,
-                    ends_at: null,
+                    starts_at: sLegacy,
+                    ends_at: eLegacy,
                     period: null
                 });
             }
@@ -11328,9 +11409,24 @@
             const mesTituloRaw = new Date(yyyy, mm - 1, 1).toLocaleDateString(getCurrentLocale(), { month: 'long', year: 'numeric' });
             const mesTitulo = `${mesTituloRaw.charAt(0).toUpperCase()}${mesTituloRaw.slice(1)}`;
 
-            const hasExactDates = Boolean(selectedPeriod.starts_at && selectedPeriod.ends_at);
-            const dIniObj = hasExactDates ? new Date(selectedPeriod.starts_at) : new Date(yyyy, mm - 1, 1);
-            const dFinObj = hasExactDates ? new Date(selectedPeriod.ends_at) : new Date(yyyy, mm, 0, 23, 59, 59);
+            let hasExactDates = Boolean(selectedPeriod.starts_at && selectedPeriod.ends_at);
+            let dIniObj = hasExactDates ? new Date(selectedPeriod.starts_at) : new Date(yyyy, mm - 1, 1);
+            let dFinObj = hasExactDates ? new Date(selectedPeriod.ends_at) : new Date(yyyy, mm, 0, 23, 59, 59);
+
+            // Garantizar 30 días para Bono Ilimitado si viniera con fechas de mes natural
+            if (selectedPeriod.tipo === 'bono_ilimitado') {
+                const isDay1 = dIniObj.getUTCDate() === 1 && dFinObj.getUTCDate() === 1;
+                const pAt = selectedPeriod.period?.purchased_at ? new Date(selectedPeriod.period.purchased_at).getTime() : 0;
+                if (isDay1 && (pAt || dFinObj.getTime() - ahoraMs <= 20 * 86400000)) {
+                    const baseT = pAt || ahoraMs;
+                    dIniObj = new Date(baseT);
+                    dFinObj = new Date(baseT + 30 * 24 * 60 * 60 * 1000);
+                    hasExactDates = true;
+                    selectedPeriod.starts_at = dIniObj.toISOString();
+                    selectedPeriod.ends_at = dFinObj.toISOString();
+                }
+            }
+
             const fIniFmt = dIniObj.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
             const fFinFmt = dFinObj.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
             const fFinLarga = dFinObj.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -19383,7 +19479,7 @@
 
             const [usersRes, periodsRes, specialRes, reprogRes, packsRes, monthlyRes] = await Promise.allSettled([
                 client.from('profiles').select('*').order('email'),
-                client.from('unlimited_membership_periods').select('id, user_id, membership_month, starts_at, ends_at').order('membership_month', { ascending: true }),
+                client.from('unlimited_membership_periods').select('id, user_id, membership_month, starts_at, ends_at, purchased_at').order('membership_month', { ascending: true }),
                 client.from('bonos_clases_especiales').select('id, user_id, mes, saldo, origen').order('mes', { ascending: true }),
                 client.from('creditos_reprogramacion').select('id, user_id, tipo, subtipo, mes, estado, created_at').order('created_at', { ascending: false }),
                 client.from('class_credit_packs').select('id, user_id, pack_type, credits_total, credits_remaining, purchased_at, expires_at').gt('credits_remaining', 0).gt('expires_at', new Date().toISOString()).order('expires_at', { ascending: true }),
@@ -19446,6 +19542,23 @@
             const ahoraMs = Date.now();
             users.forEach(u => {
                 const rawUnlimited = periodsByUser.get(u.id) || [];
+                // Auto-healing de 30 días para bono ilimitado en vista admin
+                rawUnlimited.forEach(p => {
+                    if (p.starts_at && p.ends_at) {
+                        const sD = new Date(p.starts_at);
+                        const eD = new Date(p.ends_at);
+                        if (sD.getUTCDate() === 1 && eD.getUTCDate() === 1) {
+                            const pAt = p.purchased_at ? new Date(p.purchased_at).getTime() : 0;
+                            const baseTime = (pAt && (pAt - sD.getTime() > 24 * 60 * 60 * 1000))
+                                ? pAt
+                                : ((sD.getTime() < Date.now() - 24 * 60 * 60 * 1000 && eD.getTime() > Date.now()) ? (pAt || Date.now()) : 0);
+                            if (baseTime > 0) {
+                                p.starts_at = new Date(baseTime).toISOString();
+                                p.ends_at = new Date(baseTime + 30 * 24 * 60 * 60 * 1000).toISOString();
+                            }
+                        }
+                    }
+                });
                 u.unlimited_periods = rawUnlimited.filter(p => {
                     const mKey = typeof normalizarMesClave === 'function'
                         ? normalizarMesClave(p.membership_month || p.starts_at)
@@ -20551,16 +20664,15 @@
 
                 if (!success) {
                     try {
-                        const startIso = `${mesSeleccionado}T00:00:00.000Z`;
-                        const endObj = new Date(mesSeleccionado);
-                        endObj.setMonth(endObj.getMonth() + 1);
-                        const endIso = endObj.toISOString();
+                        const now = new Date();
+                        const startIso = now.toISOString();
+                        const endIso = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
                         await client.from('unlimited_membership_periods').upsert({
                             user_id: userId,
                             membership_month: mesSeleccionado,
                             starts_at: startIso,
                             ends_at: endIso,
-                            purchased_at: new Date().toISOString()
+                            purchased_at: now.toISOString()
                         }, { onConflict: 'user_id,membership_month' });
                         await client.rpc('admin_configurar_bono_mensual', {
                             p_user_id: userId,
@@ -25548,7 +25660,7 @@
             let userMonths = [];
             try {
                 const { data: pData } = await client.from('unlimited_membership_periods')
-                    .select('id, user_id, membership_month, starts_at, ends_at')
+                    .select('id, user_id, membership_month, starts_at, ends_at, purchased_at')
                     .eq('user_id', userId)
                     .order('starts_at', { ascending: true });
                 if (pData && pData.length > 0) {
@@ -25559,6 +25671,23 @@
                         if (aIsReal && !bIsReal) return -1;
                         if (!aIsReal && bIsReal) return 1;
                         return 0;
+                    });
+                    // Auto-healing de 30 días naturales para bono ilimitado
+                    rawSorted.forEach(p => {
+                        if (p.starts_at && p.ends_at) {
+                            const sD = new Date(p.starts_at);
+                            const eD = new Date(p.ends_at);
+                            if (sD.getUTCDate() === 1 && eD.getUTCDate() === 1) {
+                                const pAt = p.purchased_at ? new Date(p.purchased_at).getTime() : 0;
+                                const baseTime = (pAt && (pAt - sD.getTime() > 24 * 60 * 60 * 1000))
+                                    ? pAt
+                                    : ((sD.getTime() < Date.now() - 24 * 60 * 60 * 1000 && eD.getTime() > Date.now()) ? (pAt || Date.now()) : 0);
+                                if (baseTime > 0) {
+                                    p.starts_at = new Date(baseTime).toISOString();
+                                    p.ends_at = new Date(baseTime + 30 * 24 * 60 * 60 * 1000).toISOString();
+                                }
+                            }
+                        }
                     });
                     const seenUAdmin = new Set();
                     userMonths = rawSorted.filter(p => {
@@ -26737,16 +26866,51 @@
                     }
                 } catch (eCert) {}
 
+                // 1. Eliminar periodos ilimitados previos en ese mes para este usuario
                 try {
-                    const { error } = await client.rpc('admin_asignar_mes_ilimitado', {
-                        p_user_id: userId,
-                        p_membership_month: mesEfectivo,
-                        p_activo: true
-                    });
-                    if (!error) assigned = true;
-                } catch (rpcErr) {
-                    console.warn('Excepción RPC admin_asignar_mes_ilimitado:', rpcErr);
+                    await client.from('unlimited_membership_periods')
+                        .delete()
+                        .eq('user_id', userId)
+                        .eq('membership_month', mesEfectivo);
+                } catch (_) {}
+
+                // 2. Insertar directamente con el rango exacto de 30 días
+                try {
+                    const { error: insErr } = await client.from('unlimited_membership_periods').upsert({
+                        user_id: userId,
+                        membership_month: mesEfectivo,
+                        starts_at: startIso,
+                        ends_at: endIso,
+                        purchased_at: new Date().toISOString()
+                    }, { onConflict: 'user_id,membership_month' });
+                    if (!insErr) assigned = true;
+                } catch (insErr) {
+                    console.warn('Error insertando unlimited_membership_periods:', insErr);
                 }
+
+                // 3. Fallback a RPC si el insert fallara
+                if (!assigned) {
+                    try {
+                        const { error } = await client.rpc('admin_asignar_mes_ilimitado', {
+                            p_user_id: userId,
+                            p_membership_month: mesEfectivo,
+                            p_activo: true
+                        });
+                        if (!error) assigned = true;
+                    } catch (rpcErr) {
+                        console.warn('Excepción RPC admin_asignar_mes_ilimitado:', rpcErr);
+                    }
+                }
+
+                // 4. Actualizar estado del bono en profiles con las fechas exactas de 30 días vía RPC segura
+                try {
+                    await client.rpc('admin_configurar_bono_mensual', {
+                        p_user_id: userId,
+                        p_activo: true,
+                        p_inicio: startIso,
+                        p_fin: endIso
+                    });
+                } catch (_) {}
 
                 // Garantizar 1 clase especial gratis (upsert con onConflict user_id,mes)
                 try {
